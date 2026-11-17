@@ -661,7 +661,7 @@ The reasons the agent reports on this condition while the Volume Group keeps wor
 | `FileDeviceDrift` | An entry backing a live Physical Volume was removed from the spec. | Restore the entry, or remove the Physical Volume by hand. |
 | `CacheStale` | The node has a Volume Group the agent's LVM cache does not know about yet, so the reconcile has nothing to work from. Clears itself. | Nothing; it resolves on the next scan. |
 
-One further reason, `VGCheckFailed`, is **not** in this list: it means the agent cannot read the node's Volume Groups at all, and an LVMVolumeGroup whose storage the agent has lost sight of is taken out of service on purpose. Check that `lvm.static` and `nsenter` work inside the agent pod.
+One further reason, `VGCheckFailed`, is **not** in this list: it means the agent cannot read the node's Volume Groups at all, and an LVMVolumeGroup whose storage the agent has lost sight of is taken out of service on purpose. Check that `/var/lib/deckhouse/sds/bin/lvm` and `nsenter` work inside the agent pod.
 
 #### Undoing a size that is too large
 

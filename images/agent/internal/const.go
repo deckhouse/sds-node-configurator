@@ -43,6 +43,7 @@ const (
 	DMSetupCmd                   = "/var/lib/deckhouse/sds/bin/dmsetup"
 	LSBLKCmd                     = "/var/lib/deckhouse/sds/bin/lsblk.dynamic"
 	LVMCmd                       = "/var/lib/deckhouse/sds/bin/lvm"
+	LVMDidExecEnv                = "LVM_DID_EXEC=1"
 	ThinDumpCmd                  = "thin_dump"
 
 	// The commands below are the node's own, not the module's. Everything above

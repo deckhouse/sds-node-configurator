@@ -19,10 +19,20 @@ package utils
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"io/fs"
+	"os/exec"
+	"path/filepath"
 	"regexp"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
@@ -365,25 +375,25 @@ func TestCommands(t *testing.T) {
 }
 
 // TestLvmStaticExtendedArgs pins three behaviors of the argv builder for
-// every lvm.static invocation that the agent runs through nsenter:
+// every lvm invocation that the agent runs through nsenter:
 //
 //  1. for a non-empty argument list the function injects a single
 //     "--config <LVMGlobalFilter + ' ' + LVMArchiveRetention>" pair
 //     IMMEDIATELY after the LVM subcommand (args[0]). Position matters
-//     here: lvm.static >= 2.03.41 rejects the command line as
+//     here: lvm >= 2.03.41 rejects the command line as
 //     "Specify options after a command" if --config precedes the
 //     subcommand, see the function comment for the rationale;
 //
 //  2. the empty-args branch is preserved verbatim: no --config is
 //     injected and the resulting argv is identical to the legacy
-//     nsenter+lvm.static prefix. This guards against regressions for
-//     diagnostic invocations like `lvm.static version`;
+//     nsenter+lvm prefix. This guards against regressions for
+//     diagnostic invocations like `lvm version`;
 //
 //  3. the original args[1:] tail is preserved without reordering.
 //
 // The expected argv always begins with the fixed nsenter prefix
-// nsentrerExpendedArgs emits ("-t 1 -m -u -i -n -p -- /<NSENTERCmd
-// path>/lvm.static"), so the test simply rebuilds the full slice and
+// nsentrerExpendedArgs emits ("-t 1 -m -u -i -n -p -- internal.LVMCmd"),
+// so the test simply rebuilds the full slice and
 // compares with assert.Equal — any future drift in either the prefix
 // or the --config placement fails loudly with a readable diff.
 func TestLvmStaticExtendedArgs(t *testing.T) {
@@ -509,6 +519,76 @@ func TestLvmStaticExtendedArgs(t *testing.T) {
 // Path-list ordering must be preserved verbatim (no sort, no dedup):
 // downstream metrics group by path string, and reordering would break log
 // correlation.
+func TestLVMCommandKeepsModuleLVM(t *testing.T) {
+	t.Setenv("SDS_AGENT_TEST_INHERITED", "kept")
+	args := []string{"lvs", "-o", "lv_name,vg_name", "--reportformat", "json"}
+
+	for name, cmd := range map[string]*exec.Cmd{
+		"without_context": lvmCommand(args),
+		"with_context":    lvmCommandContext(context.Background(), args),
+	} {
+		t.Run(name, func(t *testing.T) {
+			assert.Equal(t, internal.NSENTERCmd, cmd.Path)
+			assert.Equal(t, append([]string{internal.NSENTERCmd}, lvmStaticExtendedArgs(args)...), cmd.Args)
+			assert.True(t, slices.Contains(cmd.Env, "LVM_DID_EXEC=1"), "LVM_DID_EXEC=1 is missing from the environment")
+			assert.True(t, slices.Contains(cmd.Env, "SDS_AGENT_TEST_INHERITED=kept"), "the agent's own environment is not passed on")
+		})
+	}
+}
+
+func TestModuleLVMRunsOnlyThroughLVMCommand(t *testing.T) {
+	allowedCallers := map[string]map[string]bool{
+		"LVMCmd":                {"lvmStaticExtendedArgs": true},
+		"lvmStaticExtendedArgs": {"lvmCommand": true, "lvmCommandContext": true},
+	}
+
+	agentRoot := filepath.Join("..", "..")
+	fset := token.NewFileSet()
+	var offenders []string
+	checked := 0
+
+	err := filepath.WalkDir(agentRoot, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return err
+		}
+		file, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			return err
+		}
+		checked++
+		for _, decl := range file.Decls {
+			owner := ""
+			var node ast.Node = decl
+			if fn, ok := decl.(*ast.FuncDecl); ok {
+				if fn.Body == nil {
+					continue
+				}
+				owner, node = fn.Name.Name, fn.Body
+			}
+			var visit func(n ast.Node) bool
+			visit = func(n ast.Node) bool {
+				switch x := n.(type) {
+				case *ast.ValueSpec:
+					for _, v := range x.Values {
+						ast.Inspect(v, visit)
+					}
+					return false
+				case *ast.Ident:
+					if allowed, watched := allowedCallers[x.Name]; watched && !allowed[owner] {
+						offenders = append(offenders, fmt.Sprintf("%s: %s used in %q", fset.Position(x.Pos()), x.Name, owner))
+					}
+				}
+				return true
+			}
+			ast.Inspect(node, visit)
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	require.Positive(t, checked)
+	assert.Empty(t, offenders)
+}
+
 func TestUdevadmTriggerExtendedArgs(t *testing.T) {
 	prefix := []string{"-t", "1", "-m", "-u", "-i", "-n", "-p", "--", "udevadm"}
 
