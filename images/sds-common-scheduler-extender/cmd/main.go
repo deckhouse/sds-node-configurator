@@ -37,6 +37,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	ctrl "sigs.k8s.io/controller-runtime"
+	crcache "sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -46,6 +47,7 @@ import (
 	d8commonapi "github.com/deckhouse/sds-common-lib/api/v1alpha1"
 	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-common-lib/monitoring"
+	"github.com/deckhouse/sds-common-lib/monitoring/metricsauth"
 	slv "github.com/deckhouse/sds-local-volume/api/v1alpha1"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
@@ -137,9 +139,8 @@ func main() {
 }
 
 // defaultMetricsBindAddress keeps the endpoint on loopback when the chart says
-// nothing: the kube-rbac-proxy of the same pod is what publishes it. The fleet-wide
-// fallback is the wildcard ":8080", which would both answer unauthenticated on the
-// pod IP and collide with the proxy, since the two carry the same port number.
+// nothing: the fleet-wide fallback is the wildcard ":8080", which would answer
+// unauthenticated on the pod IP.
 const defaultMetricsBindAddress = "127.0.0.1:8080"
 
 func subMain(ctx context.Context) error {
@@ -196,11 +197,14 @@ func subMain(ctx context.Context) error {
 		// controller-runtime binds :8080 whenever this is empty, so the extender has
 		// always served its own reconcile and workqueue metrics -- nothing declared the
 		// port or scraped it. Naming the address here puts it under the same
-		// METRICS_BIND_ADDRESS the rest of the fleet reads, and the chart now declares
-		// the port and ships a ServiceMonitor for it.
-		Metrics:                metricsserver.Options{BindAddress: monitoring.BindAddressFromEnvOr(defaultMetricsBindAddress)},
+		// METRICS_BIND_ADDRESS the rest of the fleet reads, and the chart declares
+		// the port and ships a PodMonitor for it.
+		Metrics:                metricsauth.ApplyFromEnv(metricsserver.Options{BindAddress: monitoring.BindAddressFromEnvOr(defaultMetricsBindAddress)}),
 		HealthProbeBindAddress: config.HealthProbeBindAddress,
 		BaseContext:            func() context.Context { return ctx },
+		Cache: crcache.Options{
+			DefaultTransform: crcache.TransformStripManagedFields(),
+		},
 	}
 
 	mgr, err := manager.New(kConfig, managerOpts)

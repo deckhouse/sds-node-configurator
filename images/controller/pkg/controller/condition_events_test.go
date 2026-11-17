@@ -23,7 +23,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/deckhouse/sds-common-lib/conditions"
@@ -33,7 +33,7 @@ import (
 )
 
 // drainEvents returns what the fake recorder has received so far.
-func drainEvents(rec *record.FakeRecorder) []string {
+func drainEvents(rec *events.FakeRecorder) []string {
 	var got []string
 	for {
 		select {
@@ -53,8 +53,8 @@ func TestLVGReadyRecordsTransitions(t *testing.T) {
 	writes := 0
 	lvg := lvgWith(falseCond(internal.TypeVGConfigurationApplied, internal.ReasonCreating))
 	cl := newVerdictTestClient(t, &writes, lvg)
-	fake := record.NewFakeRecorder(10)
-	rec := withoutProgressEvents(conditions.FromLegacyRecorder(fake))
+	fake := events.NewFakeRecorder(10)
+	rec := withoutProgressEvents(fake)
 
 	setStages := func(conds ...metav1.Condition) {
 		t.Helper()
@@ -99,8 +99,8 @@ func TestLVGSetReadyRecordsTransitions(t *testing.T) {
 	cl := newFakeClientWithLVGSetStatus()
 	lvgSet := &v1alpha1.LVMVolumeGroupSet{ObjectMeta: metav1.ObjectMeta{Name: "set-a"}}
 	require.NoError(t, cl.Create(ctx, lvgSet))
-	fake := record.NewFakeRecorder(10)
-	rec := withoutProgressEvents(conditions.FromLegacyRecorder(fake))
+	fake := events.NewFakeRecorder(10)
+	rec := withoutProgressEvents(fake)
 
 	steps := []struct {
 		name   string
@@ -128,8 +128,8 @@ func TestLVGSetReadyRecordsTransitions(t *testing.T) {
 func TestWithoutProgressEvents(t *testing.T) {
 	assert.Nil(t, withoutProgressEvents(nil), "a nil recorder must stay nil so that the helpers record nothing")
 
-	fake := record.NewFakeRecorder(10)
-	rec := withoutProgressEvents(conditions.FromLegacyRecorder(fake))
+	fake := events.NewFakeRecorder(10)
+	rec := withoutProgressEvents(fake)
 	lvg := &v1alpha1.LVMVolumeGroup{}
 
 	rec.Eventf(lvg, nil, "Warning", conditions.ReasonPending, "Ready", "%s", "waiting")

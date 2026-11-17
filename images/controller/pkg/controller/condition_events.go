@@ -49,7 +49,7 @@ var progressReasons = []string{
 // still is: a group that becomes Ready gets its Normal Event, and one that
 // fails gets its Warning.
 func newEventRecorder(mgr manager.Manager, name string) conditions.EventRecorder {
-	return withoutProgressEvents(conditions.FromLegacyRecorder(mgr.GetEventRecorderFor(name)))
+	return withoutProgressEvents(mgr.GetEventRecorder(name))
 }
 
 // withoutProgressEvents drops the Warning Events whose reason is one of

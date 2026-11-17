@@ -25,6 +25,8 @@ import (
 	v1 "k8s.io/api/core/v1"
 	apiruntime "k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -32,11 +34,15 @@ import (
 	d8commonapi "github.com/deckhouse/sds-common-lib/api/v1alpha1"
 	"github.com/deckhouse/sds-common-lib/logger"
 	commonmonitoring "github.com/deckhouse/sds-common-lib/monitoring"
+	"github.com/deckhouse/sds-common-lib/monitoring/metricsauth"
+	"github.com/deckhouse/sds-common-lib/webhookserver"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/controller/config"
+	"github.com/deckhouse/sds-node-configurator/images/controller/internal"
 	"github.com/deckhouse/sds-node-configurator/images/controller/pkg/controller"
 	"github.com/deckhouse/sds-node-configurator/images/controller/pkg/kubutils"
 	"github.com/deckhouse/sds-node-configurator/images/controller/pkg/monitoring"
+	"github.com/deckhouse/sds-node-configurator/images/webhooks/handlers"
 )
 
 var (
@@ -102,11 +108,19 @@ func main() {
 	managerOpts := manager.Options{
 		Scheme:                  scheme,
 		Logger:                  baseLog.GetLogger(),
-		Metrics:                 server.Options{BindAddress: cfgParams.MetricsBindAddress},
+		Metrics:                 metricsauth.ApplyFromEnv(server.Options{BindAddress: cfgParams.MetricsBindAddress}),
 		HealthProbeBindAddress:  cfgParams.HealthProbeBindAddress,
 		LeaderElection:          cfgParams.LeaderElection,
 		LeaderElectionID:        cfgParams.LeaderElectionID,
 		LeaderElectionNamespace: cfgParams.LeaderElectionNamespace,
+		Cache: cache.Options{
+			DefaultTransform: cache.TransformStripManagedFields(),
+			ByObject: map[client.Object]cache.ByObject{
+				&v1.Pod{}: {
+					Namespaces: map[string]cache.Config{internal.SdsNodeConfiguratorNamespace: {}},
+				},
+			},
+		},
 	}
 
 	mgr, err := manager.New(kConfig, managerOpts)
@@ -157,6 +171,29 @@ func main() {
 	if err != nil {
 		log.Error("unable to run RunMissingNodeRelease", logger.Err(err))
 		os.Exit(1)
+	}
+
+	webhookOpts, webhooksEnabled, err := webhookserver.OptionsFromEnv()
+	if err != nil {
+		log.Error("unable to read the webhook server configuration", logger.Err(err))
+		os.Exit(1)
+	}
+	if webhooksEnabled {
+		cl, err := client.New(kConfig, client.Options{Scheme: scheme})
+		if err != nil {
+			log.Error("unable to create the Kubernetes client for the webhooks", logger.Err(err))
+			os.Exit(1)
+		}
+		hs, err := handlers.Handlers(baseLog.Named("webhooks"), cl)
+		if err != nil {
+			log.Error("unable to create the webhook handlers", logger.Err(err))
+			os.Exit(1)
+		}
+		if err = webhookserver.Add(mgr, webhookOpts, hs); err != nil {
+			log.Error("unable to add the webhook server", logger.Err(err))
+			os.Exit(1)
+		}
+		log.Info("serving the admission webhooks", "port", webhookOpts.Port, "certDir", webhookOpts.CertDir)
 	}
 
 	if err = mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {

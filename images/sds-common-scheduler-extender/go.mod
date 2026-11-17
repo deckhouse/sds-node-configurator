@@ -1,16 +1,17 @@
 module github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender
 
 go 1.27.4
+
 require (
-	github.com/deckhouse/sds-common-lib v0.15.0
+	github.com/deckhouse/sds-common-lib v0.22.0
 	github.com/deckhouse/sds-local-volume/api v0.0.0-20261104031416-b961acd10243
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20250424082358-e271071c2a57
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20261101171453-6f1e162df1a7
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
-	k8s.io/api v0.35.1
-	k8s.io/apimachinery v0.35.2
-	k8s.io/client-go v0.35.1
+	k8s.io/api v0.35.10
+	k8s.io/apimachinery v0.35.10
+	k8s.io/client-go v0.35.10
 	sigs.k8s.io/controller-runtime v0.23.3
 	sigs.k8s.io/yaml v1.6.0
 )
@@ -20,6 +21,7 @@ require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
+	github.com/deckhouse/deckhouse/pkg/kube-rbac-auth v0.1.0 // indirect
 	github.com/deckhouse/deckhouse/pkg/log v0.2.1 // indirect
 	github.com/deckhouse/deckhouse/pkg/metrics-storage v0.3.0 // indirect
 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
@@ -70,11 +72,11 @@ require (
 	golang.org/x/text v0.43.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.4.0 // indirect
-	google.golang.org/protobuf v1.36.11 // indirect
+	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	k8s.io/apiextensions-apiserver v0.35.0 // indirect
+	k8s.io/apiextensions-apiserver v0.35.10 // indirect
 	k8s.io/klog/v2 v2.130.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20250910181357-589584f1c912 // indirect
 	k8s.io/utils v0.0.0-20260210185600-b8788abfbbc2 // indirect

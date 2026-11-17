@@ -61,7 +61,7 @@ var progressReasons = []string{
 // recorded. The move out of it still is: a volume that becomes Ready gets its
 // Normal Event, and one that fails gets its Warning.
 func NewEventRecorder(mgr manager.Manager, name string) conditions.EventRecorder {
-	return WithoutProgressEvents(conditions.FromLegacyRecorder(mgr.GetEventRecorderFor(name)))
+	return WithoutProgressEvents(mgr.GetEventRecorder(name))
 }
 
 // WithoutProgressEvents drops the Warning Events whose reason is one of

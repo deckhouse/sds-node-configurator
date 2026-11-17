@@ -31,6 +31,7 @@ import (
 	extv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	crcache "sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -138,6 +139,9 @@ func run() int {
 		Logger:                 baseLog.GetLogger(),
 		Metrics:                server.Options{BindAddress: cfgParams.MetricsBindAddress},
 		HealthProbeBindAddress: cfgParams.HealthProbeBindAddress,
+		Cache: crcache.Options{
+			DefaultTransform: crcache.TransformStripManagedFields(),
+		},
 	}
 
 	mgr, err := manager.New(kConfig, managerOpts)

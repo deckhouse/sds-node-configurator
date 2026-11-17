@@ -32,29 +32,30 @@ properties:
         type: integer
         default: 8080
         description: |
-          The port the kube-rbac-proxy publishes the controller metrics on. Reaching
-          it requires "get" on deployments/prometheus-metrics for the controller; the
-          controller itself keeps its metrics on 127.0.0.1.
+          The port the sds-health-watcher-controller serves its metrics on, over
+          HTTPS: the manager's own reconcile and workqueue series plus this module's
+          sds_node_configurator_* counters. Reaching it requires "get" on
+          deployments/prometheus-metrics for the controller, which the controller
+          checks on every scrape.
       controllerMetricsPort:
         type: integer
         default: 8080
         description: |
-          The port the sds-health-watcher-controller serves its metrics on: the
-          manager's own reconcile and workqueue series plus this module's
-          sds_node_configurator_* counters.
+          Not used: the sds-health-watcher-controller serves its metrics on
+          controllerMetricsProxyPort.
       schedulerExtenderMetricsProxyPort:
         type: integer
         default: 8080
         description: |
-          The port the kube-rbac-proxy publishes the scheduler extender metrics on.
+          The port the scheduler extender serves its metrics on, over HTTPS.
           Reaching it requires "get" on deployments/prometheus-metrics for the
-          extender.
+          extender, which the extender checks on every scrape.
       schedulerExtenderMetricsPort:
         type: integer
         default: 8080
         description: |
-          The port the scheduler extender serves its metrics on. The manager has
-          always bound it; until now nothing declared the port or scraped it.
+          Not used: the scheduler extender serves its metrics on
+          schedulerExtenderMetricsProxyPort.
       customSchedulerExtenderCert:
         type: object
         default: {}

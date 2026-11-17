@@ -29,7 +29,6 @@ spec:
                every recommendation to itself. */}}
         memory: 128Mi
         cpu: 100m
-    {{- include "helm_lib_vpa_kube_rbac_proxy_resources" . | nindent 4 }}
 {{- end }}
 ---
 apiVersion: policy/v1
@@ -51,7 +50,7 @@ metadata:
   namespace: d8-{{ .Chart.Name }}
   {{- include "helm_lib_module_labels" (list . (dict "app" "sds-common-scheduler-extender" )) | nindent 2 }}
 spec:
-  {{- include "helm_lib_deployment_strategy_and_replicas_for_ha" . | nindent 2 }}
+  {{- include "helm_lib_module_controller_on_master_strategy_and_replicas_for_ha" . | nindent 2 }}
   revisionHistoryLimit: 2
   selector:
     matchLabels:
@@ -100,12 +99,16 @@ spec:
             - --config=/etc/sds-common-scheduler-extender/scheduler-extender-config.yaml
           env:
             {{- /*
-              Loopback: the endpoint authenticates nobody, and a pod port is reachable
-              from every pod in the cluster. The kube-rbac-proxy below publishes it
-              after an authorization check, the same shape the agent uses.
+              The extender authorizes every scrape itself with a TokenReview and a
+              SubjectAccessReview, which its ServiceAccount creates through the
+              binding to system:kube-scheduler.
             */}}
             - name: METRICS_BIND_ADDRESS
-              value: "127.0.0.1:{{ .Values.sdsNodeConfigurator.internal.schedulerExtenderMetricsPort }}"
+              value: ":{{ .Values.sdsNodeConfigurator.internal.schedulerExtenderMetricsProxyPort }}"
+            - name: METRICS_AUTHORIZATION_NAMESPACE
+              value: d8-{{ .Chart.Name }}
+            - name: METRICS_AUTHORIZATION_DEPLOYMENT
+              value: sds-common-scheduler-extender
             - name: LOG_LEVEL
               value: {{ include "helm_lib_module_controller_log_level" (list . "sdsNodeConfigurator") | quote }}
             {{- /*
@@ -144,56 +147,9 @@ spec:
            - containerPort: 8099
              protocol: TCP
              name: http
-        - name: kube-rbac-proxy
-          {{- include "helm_lib_module_container_security_context_pss_restricted_flexible" dict | nindent 10 }}
-          image: {{ include "helm_lib_module_common_image" (list . "kubeRbacProxy") }}
-          imagePullPolicy: IfNotPresent
-          args:
-            - "--secure-listen-address=$(KUBE_RBAC_PROXY_LISTEN_ADDRESS):{{ .Values.sdsNodeConfigurator.internal.schedulerExtenderMetricsProxyPort }}"
-            - "--v=2"
-            - "--logtostderr=true"
-            - "--stale-cache-interval=1h30m"
-            - "--livez-path=/livez"
-          env:
-            - name: KUBE_RBAC_PROXY_LISTEN_ADDRESS
-              valueFrom:
-                fieldRef:
-                  fieldPath: status.podIP
-            - name: KUBE_RBAC_PROXY_CONFIG
-              value: |
-                excludePaths:
-                - /livez
-                upstreams:
-                - upstream: http://127.0.0.1:{{ .Values.sdsNodeConfigurator.internal.schedulerExtenderMetricsPort }}/metrics
-                  path: /metrics
-                  authorization:
-                    resourceAttributes:
-                      namespace: d8-{{ .Chart.Name }}
-                      apiGroup: apps
-                      apiVersion: v1
-                      resource: deployments
-                      subresource: prometheus-metrics
-                      name: sds-common-scheduler-extender
-          ports:
-            - name: https-metrics
-              containerPort: {{ .Values.sdsNodeConfigurator.internal.schedulerExtenderMetricsProxyPort }}
-              protocol: TCP
-          livenessProbe:
-            httpGet:
-              path: /livez
-              port: {{ .Values.sdsNodeConfigurator.internal.schedulerExtenderMetricsProxyPort }}
-              scheme: HTTPS
-          {{- /* No readinessProbe on purpose: readiness of the pod gates the endpoints of
-                 the Service the kube-scheduler calls, and a sidecar that only serves metrics
-                 must not be able to stop scheduling. A proxy that wedges is restarted by the
-                 liveness probe, and one that is not up yet is kept out of the scrape targets
-                 by the readiness filter in the PodMonitor. */}}
-          resources:
-            requests:
-              {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 14 }}
-              {{- if not (include "helm_lib_api_version_exists" (list . "autoscaling.k8s.io/v1/VerticalPodAutoscaler")) }}
-              {{- include "helm_lib_container_kube_rbac_proxy_resources" . | nindent 14 }}
-              {{- end }}
+           - containerPort: {{ .Values.sdsNodeConfigurator.internal.schedulerExtenderMetricsProxyPort }}
+             protocol: TCP
+             name: https-metrics
       volumes:
       - name: scheduler-extender-config
         configMap:

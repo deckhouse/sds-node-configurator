@@ -1,17 +1,16 @@
 {{- /* RBAC */ -}}
 {{- /*
-  controllerMetricsProxyPort is not used as a port here. It is how
-  helm_lib_module_controller_rbac learns that the pod carries a kube-rbac-proxy in
-  front of the metrics, and therefore needs the ClusterRoleBinding to d8:rbac-proxy
-  that lets the sidecar create the TokenReview and SubjectAccessReview every scrape
-  is authorised with. Keep it in step with the value given to
-  helm_lib_module_controller_manifests: without it the proxy fails closed on every
-  scrape and the only symptom is up == 0 and a permanent TargetDown.
+  controllerMetricsProxyPort is not used as a port here. It makes
+  helm_lib_module_controller_rbac bind the controller to d8:rbac-proxy, which lets
+  the controller create the TokenReview and SubjectAccessReview every scrape is
+  authorised with. Without it every scrape fails and the only symptom is up == 0
+  and a permanent TargetDown.
 */ -}}
 {{- $rbacConfig := dict
   "controllerMetricsProxyPort" (int .Values.sdsNodeConfigurator.internal.controllerMetricsProxyPort)
   "roleRules" (list
     (dict "apiGroups" (list "") "resources" (list "events") "verbs" (list "create" "patch"))
+    (dict "apiGroups" (list "events.k8s.io") "resources" (list "events") "verbs" (list "create" "patch"))
   )
   "clusterRoleRules" (list
     (dict "apiGroups" (list "storage.deckhouse.io") "resources" (list "blockdevices") "verbs" (list "get" "list" "watch" "update" "delete"))
@@ -20,6 +19,7 @@
     (dict "apiGroups" (list "storage.deckhouse.io") "resources" (list "lvmlogicalvolumes") "verbs" (list "get" "list" "patch"))
     (dict "apiGroups" (list "storage.deckhouse.io") "resources" (list "lvmlogicalvolumesnapshots") "verbs" (list "get" "list" "watch" "patch"))
     (dict "apiGroups" (list "") "resources" (list "events") "verbs" (list "create" "patch"))
+    (dict "apiGroups" (list "events.k8s.io") "resources" (list "events") "verbs" (list "create" "patch"))
     (dict "apiGroups" (list "") "resources" (list "nodes" "pods") "verbs" (list "get" "list" "watch"))
     (dict "apiGroups" (list "coordination.k8s.io") "resources" (list "leases") "verbs" (list "get" "list" "watch" "update" "create" "delete"))
   )
@@ -27,10 +27,10 @@
 {{ include "helm_lib_module_controller_rbac" (list . $rbacConfig) }}
 {{- /*
   The controller records Events on LVMVolumeGroup and LVMVolumeGroupSet through
-  the core/v1 recorder. Both kinds are cluster-scoped, and the Event of a
+  events.k8s.io/v1. Both kinds are cluster-scoped, and the Event of a
   cluster-scoped object is created in the default namespace: client-go creates
-  it there and patches it on a repeat. The "events" rule in roleRules above
-  covers only the module namespace, where leader election records.
+  it there and patches it on a repeat. The "events" rules in roleRules above
+  cover only the module namespace, where leader election records.
 */}}
 ---
 kind: Role
@@ -41,6 +41,9 @@ metadata:
   {{- include "helm_lib_module_labels" (list . (dict "app" "controller")) | nindent 2 }}
 rules:
   - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  - apiGroups: ["events.k8s.io"]
     resources: ["events"]
     verbs: ["create", "patch"]
 ---

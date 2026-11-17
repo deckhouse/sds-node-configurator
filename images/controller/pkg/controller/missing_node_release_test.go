@@ -30,7 +30,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	apiruntime "k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -121,7 +121,7 @@ func releaseScheme(t *testing.T) *apiruntime.Scheme {
 
 type releaseFixture struct {
 	cl       client.WithWatch
-	recorder *record.FakeRecorder
+	recorder *events.FakeRecorder
 	r        *missingNodeRelease
 }
 
@@ -135,7 +135,7 @@ func newReleaseFixture(t *testing.T, grace time.Duration, cacheFuncs *intercepto
 	if cacheFuncs != nil {
 		cache = interceptor.NewClient(store, *cacheFuncs)
 	}
-	recorder := record.NewFakeRecorder(100)
+	recorder := events.NewFakeRecorder(100)
 	return releaseFixture{
 		cl:       store,
 		recorder: recorder,
@@ -290,7 +290,7 @@ func TestMissingNodeReleaseDoesNothingWhenTheNodeCannotBeChecked(t *testing.T) {
 			return c.Get(ctx, key, obj, opts...)
 		},
 	})
-	r := &missingNodeRelease{cl: store, reader: reader, recorder: record.NewFakeRecorder(10), log: logger.NewNop(),
+	r := &missingNodeRelease{cl: store, reader: reader, recorder: events.NewFakeRecorder(10), log: logger.NewNop(),
 		metrics: monitoring.GetMetrics(""), grace: testGrace}
 
 	require.NoError(t, r.pass(context.Background(), releaseNow))

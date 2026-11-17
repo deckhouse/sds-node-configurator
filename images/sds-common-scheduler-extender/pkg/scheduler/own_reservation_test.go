@@ -55,7 +55,7 @@ func ownReservationSetup(t *testing.T) (*scheduler, *cache.Cache, map[string]*co
 func TestOwnReservation_FilterRetryKeepsNode(t *testing.T) {
 	log, _ := logger.NewLogger("0")
 	pool := []cache.StoragePoolKey{{LVGName: "lvg1"}}
-	nodes := map[string]*corev1.Node{"node-1": {ObjectMeta: metav1.ObjectMeta{Name: "node-1"}}}
+	nodes := map[string]metav1.Object{"node-1": &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}}}
 
 	for _, tc := range []struct {
 		name          string

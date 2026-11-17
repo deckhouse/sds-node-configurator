@@ -27,7 +27,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/deckhouse/sds-common-lib/logger"
-	"github.com/deckhouse/sds-common-lib/logger/kwhlogger"
 	cn "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/webhooks/handlers"
 )
@@ -55,11 +54,7 @@ func initFlags() config {
 	return cfg
 }
 
-const (
-	port            = ":8443"
-	llvsValidatorID = "LLVSValidator"
-	lvgValidatorID  = "LVGValidator"
-)
+const port = ":8443"
 
 func main() {
 	// LOG_LEVEL arrives as a number 0..4 from lib-helm, the same value the controller
@@ -70,15 +65,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "unable to create the logger: %s\n", err)
 		os.Exit(1)
 	}
-	kwhLog := kwhlogger.New(log)
-
 	cfg := initFlags()
-
-	llvsValidatingWebhookHandler, err := handlers.GetValidatingWebhookHandler(handlers.LLVSValidate, llvsValidatorID, &cn.LVMLogicalVolumeSnapshot{}, kwhLog)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error creating llvsValidatingWebhookHandler: %s", err)
-		os.Exit(1)
-	}
 
 	scheme := runtime.NewScheme()
 	if err := cn.AddToScheme(scheme); err != nil {
@@ -98,15 +85,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	lvgValidatingWebhookHandler, err := handlers.GetValidatingWebhookHandler(handlers.LVGValidate(cl, log.Named("lvg-validate")), lvgValidatorID, &cn.LVMVolumeGroup{}, kwhLog)
+	hs, err := handlers.Handlers(log, cl)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error creating lvgValidatingWebhookHandler: %s", err)
+		fmt.Fprintf(os.Stderr, "error creating the webhook handlers: %s", err)
 		os.Exit(1)
 	}
 
 	mux := http.NewServeMux()
-	mux.Handle("/llvs-validate", llvsValidatingWebhookHandler)
-	mux.Handle("/lvg-validate", lvgValidatingWebhookHandler)
+	for path, h := range hs {
+		mux.Handle(path, h)
+	}
 	mux.HandleFunc("/healthz", httpHandlerHealthz)
 
 	log.Info("listening", "address", port)

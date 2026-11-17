@@ -23,6 +23,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/deckhouse/sds-common-lib/logger"
@@ -75,11 +76,11 @@ func requiresLVGCheck(volumeAccess srv.ReplicatedStorageClassVolumeAccess) bool 
 		volumeAccess == srv.VolumeAccessEventuallyLocal
 }
 
-func isNodeInZones(node *corev1.Node, zones []string) bool {
+func isNodeInZones(node metav1.Object, zones []string) bool {
 	if len(zones) == 0 {
 		return true
 	}
-	nodeZone := node.Labels["topology.kubernetes.io/zone"]
+	nodeZone := node.GetLabels()["topology.kubernetes.io/zone"]
 	for _, z := range zones {
 		if z == nodeZone {
 			return true
@@ -88,8 +89,8 @@ func isNodeInZones(node *corev1.Node, zones []string) bool {
 	return false
 }
 
-func hasReplicatedNodeLabel(node *corev1.Node) bool {
-	_, exists := node.Labels[srv.AgentNodeLabelKey]
+func hasReplicatedNodeLabel(node metav1.Object) bool {
+	_, exists := node.GetLabels()[srv.AgentNodeLabelKey]
 	return exists
 }
 
@@ -218,7 +219,7 @@ func filterNodeForReplicatedPVCs(
 	log logger.Logger,
 	cl client.Client,
 	nodeName string,
-	node *corev1.Node,
+	node metav1.Object,
 	replicatedPVCs map[string]*corev1.PersistentVolumeClaim,
 	scUsedByPVCs map[string]*storagev1.StorageClass,
 	pvcRequests map[string]PVCRequest,
@@ -340,10 +341,11 @@ func nodeHasReplicaForPVC(nodeName, pvcName string, replicaLocations map[string]
 	return false
 }
 
-func getNodes(ctx context.Context, cl client.Client, nodeNames []string) (map[string]*corev1.Node, error) {
-	nodes := make(map[string]*corev1.Node, len(nodeNames))
+func getNodes(ctx context.Context, cl client.Client, nodeNames []string) (map[string]metav1.Object, error) {
+	nodes := make(map[string]metav1.Object, len(nodeNames))
 	for _, nodeName := range nodeNames {
-		node := &corev1.Node{}
+		node := &metav1.PartialObjectMetadata{}
+		node.SetGroupVersionKind(corev1.SchemeGroupVersion.WithKind("Node"))
 		err := cl.Get(ctx, client.ObjectKey{Name: nodeName}, node)
 		if err != nil {
 			return nil, fmt.Errorf("unable to get node %s: %w", nodeName, err)

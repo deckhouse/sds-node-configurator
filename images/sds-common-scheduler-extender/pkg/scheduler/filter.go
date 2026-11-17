@@ -30,6 +30,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/deckhouse/sds-common-lib/logger"
@@ -162,7 +163,7 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 	// the space check trivially passes when RequestedSize == 0).
 
 	// Check if there are replicated PVCs that require node information
-	var nodes map[string]*corev1.Node
+	var nodes map[string]metav1.Object
 	if hasReplicatedPVCs(managedPVCs, scUsedByPVCs) {
 		servingLog.Debug("Pod has replicated PVCs, fetching node information")
 		nodes, err = getNodes(ctx, s.client, nodeNames)
@@ -270,7 +271,7 @@ func filterNodes(
 	cl client.Client,
 	schedulerCache *cache.Cache,
 	nodeNames *[]string,
-	nodes map[string]*corev1.Node,
+	nodes map[string]metav1.Object,
 	managedPVCs map[string]*corev1.PersistentVolumeClaim,
 	scUsedByPVCs map[string]*storagev1.StorageClass,
 	pvcRequests map[string]PVCRequest,

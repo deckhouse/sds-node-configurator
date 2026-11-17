@@ -23,7 +23,7 @@ import (
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 
 	"github.com/deckhouse/sds-common-lib/conditions"
 	"github.com/deckhouse/sds-common-lib/logger"
@@ -35,7 +35,7 @@ import (
 )
 
 // drainEvents returns what the fake recorder has received so far.
-func drainEvents(rec *record.FakeRecorder) []string {
+func drainEvents(rec *events.FakeRecorder) []string {
 	var got []string
 	for {
 		select {
@@ -54,14 +54,14 @@ func drainEvents(rec *record.FakeRecorder) []string {
 var _ = Describe("condition Events", func() {
 	var (
 		ctx  context.Context
-		fake *record.FakeRecorder
+		fake *events.FakeRecorder
 		rec  conditions.EventRecorder
 	)
 
 	BeforeEach(func() {
 		ctx = context.Background()
-		fake = record.NewFakeRecorder(20)
-		rec = internal.WithoutProgressEvents(conditions.FromLegacyRecorder(fake))
+		fake = events.NewFakeRecorder(20)
+		rec = internal.WithoutProgressEvents(fake)
 	})
 
 	It("records the LVMLogicalVolume becoming Ready, failing and recovering, and nothing in between", func() {

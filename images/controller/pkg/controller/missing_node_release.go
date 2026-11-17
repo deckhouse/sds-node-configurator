@@ -25,7 +25,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -75,7 +75,7 @@ func RunMissingNodeRelease(mgr manager.Manager, log logger.Logger, cfg config.Op
 	return mgr.Add(&missingNodeRelease{
 		cl:       mgr.GetClient(),
 		reader:   mgr.GetAPIReader(),
-		recorder: mgr.GetEventRecorderFor(MissingNodeReleaseCtrlName),
+		recorder: mgr.GetEventRecorder(MissingNodeReleaseCtrlName),
 		log:      log.Named(MissingNodeReleaseCtrlName),
 		metrics:  metrics,
 		grace:    cfg.MissingNodeGracePeriod,
@@ -86,7 +86,7 @@ func RunMissingNodeRelease(mgr manager.Manager, log logger.Logger, cfg config.Op
 type missingNodeRelease struct {
 	cl       client.Client
 	reader   client.Reader
-	recorder record.EventRecorder
+	recorder events.EventRecorder
 	log      logger.Logger
 	metrics  monitoring.Metrics
 	grace    time.Duration
@@ -297,7 +297,7 @@ func (r *missingNodeRelease) syncMissingSince(ctx context.Context, lvg *v1alpha1
 		if r.grace > 0 {
 			message += fmt.Sprintf("; if this resource or its volumes are deleted, the finalizer %s is removed from them once the node has been gone for %s", internal.AgentFinalizer, r.grace)
 		}
-		r.recorder.Event(lvg, v1.EventTypeWarning, eventReasonNodeMissing, message)
+		r.recorder.Eventf(lvg, nil, v1.EventTypeWarning, eventReasonNodeMissing, "ReleaseMissingNode", "%s", message)
 		r.log.Warn(fmt.Sprintf("LVMVolumeGroup %s: %s", lvg.Name, message))
 		return since, nil
 	default:
@@ -424,7 +424,7 @@ func (r *missingNodeRelease) release(ctx context.Context, obj client.Object, kin
 
 	message := fmt.Sprintf("node %s is not in the cluster since %s, longer than %s: removed the finalizer %s; nothing was cleaned up on the node",
 		nodeName, since.UTC().Format(time.RFC3339), r.grace, internal.AgentFinalizer)
-	r.recorder.Event(fresh, v1.EventTypeWarning, eventReasonAgentFinalizerReleased, message)
+	r.recorder.Eventf(fresh, nil, v1.EventTypeWarning, eventReasonAgentFinalizerReleased, "ReleaseMissingNode", "%s", message)
 	r.log.Warn(fmt.Sprintf("%s %s: %s", kind, obj.GetName(), message))
 	return nil
 }
