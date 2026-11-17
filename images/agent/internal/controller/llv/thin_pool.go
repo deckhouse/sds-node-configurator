@@ -18,138 +18,22 @@ package llv
 
 import (
 	"context"
-	"fmt"
-	"sync"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/thinpoolalloc"
 )
-
-type thinPoolKey struct {
-	vgName, poolName string
-}
-
-type thinPoolLock struct {
-	held chan struct{}
-	refs int
-}
-
-type thinPoolLocks struct {
-	mu    sync.Mutex
-	locks map[thinPoolKey]*thinPoolLock
-}
-
-func (l *thinPoolLocks) lock(ctx context.Context, vgName, poolName string) (func(), error) {
-	key := thinPoolKey{vgName: vgName, poolName: poolName}
-
-	l.mu.Lock()
-	if l.locks == nil {
-		l.locks = make(map[thinPoolKey]*thinPoolLock)
-	}
-	entry, ok := l.locks[key]
-	if !ok {
-		entry = &thinPoolLock{held: make(chan struct{}, 1)}
-		l.locks[key] = entry
-	}
-	entry.refs++
-	l.mu.Unlock()
-
-	select {
-	case entry.held <- struct{}{}:
-	case <-ctx.Done():
-		l.forget(key, entry)
-		return nil, fmt.Errorf("unable to lock thin pool %s in VG %s: %w", poolName, vgName, ctx.Err())
-	}
-
-	var once sync.Once
-	return func() {
-		once.Do(func() {
-			<-entry.held
-			l.forget(key, entry)
-		})
-	}, nil
-}
-
-func (l *thinPoolLocks) forget(key thinPoolKey, entry *thinPoolLock) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	entry.refs--
-	if entry.refs == 0 {
-		delete(l.locks, key)
-	}
-}
 
 func (r *Reconciler) lockThinPool(ctx context.Context, llv *v1alpha1.LVMLogicalVolume, lvg *v1alpha1.LVMVolumeGroup) (func(), error) {
 	if llv.Spec.Type != internal.Thin || llv.Spec.Thin == nil {
 		return func() {}, nil
 	}
 
-	return r.thinPools.lock(ctx, lvg.Spec.ActualVGNameOnTheNode, llv.Spec.Thin.PoolName)
+	return r.thinPools.Lock(ctx, lvg.Spec.ActualVGNameOnTheNode, llv.Spec.Thin.PoolName)
 }
 
 func (r *Reconciler) checkThinPoolSpace(lvg *v1alpha1.LVMVolumeGroup, poolName, lvName, sourceLVName string, size resource.Quantity) error {
-	var pool *v1alpha1.LVMVolumeGroupThinPoolStatus
-	for i := range lvg.Status.ThinPools {
-		if lvg.Status.ThinPools[i].Name == poolName {
-			pool = &lvg.Status.ThinPools[i]
-			break
-		}
-	}
-	if pool == nil {
-		return fmt.Errorf("thin pool %s is not found in the status of the LVMVolumeGroup %s", poolName, lvg.Name)
-	}
-
-	vgName := lvg.Spec.ActualVGNameOnTheNode
-	lvs, cmd, _, err := r.commands.GetVGLVs(vgName)
-	r.log.Debug(fmt.Sprintf("ran cmd: %s", cmd))
-	if err != nil {
-		return fmt.Errorf("unable to count the space allocated in thin pool %s of VG %s: %w", poolName, vgName, err)
-	}
-
-	poolSize := pool.ActualSize
-	var allocated, current, sourceSize int64
-	for _, lv := range lvs {
-		if lv.VGName != vgName {
-			continue
-		}
-		if lv.LVName == poolName && utils.IsLVThinPool(lv.LVAttr) {
-			poolSize = lv.LVSize
-		}
-		if sourceLVName != "" && lv.LVName == sourceLVName {
-			sourceSize = lv.LVSize.Value()
-		}
-		if lv.PoolName == poolName {
-			allocated += lv.LVSize.Value()
-			if lv.LVName == lvName {
-				current = lv.LVSize.Value()
-			}
-		}
-	}
-
-	limit, err := utils.GetThinPoolSpaceWithAllocationLimit(poolSize, pool.AllocationLimit)
-	if err != nil {
-		return fmt.Errorf("unable to apply allocationLimit %q of thin pool %s: %w", pool.AllocationLimit, poolName, err)
-	}
-
-	needed := max(size.Value(), sourceSize) - current
-	left := limit.Value() - allocated
-	if needed > 0 && left < needed {
-		return fmt.Errorf(
-			"not enough space: thin pool %s of VG %s has %s allocated out of %s allowed by allocationLimit %s (pool size %s), %s left, %s requested",
-			poolName,
-			vgName,
-			resource.NewQuantity(allocated, resource.BinarySI).String(),
-			limit.String(),
-			pool.AllocationLimit,
-			poolSize.String(),
-			resource.NewQuantity(max(left, 0), resource.BinarySI).String(),
-			resource.NewQuantity(needed, resource.BinarySI).String(),
-		)
-	}
-
-	return nil
+	return thinpoolalloc.CheckSpace(r.log, r.commands, lvg, poolName, lvName, sourceLVName, size)
 }

@@ -174,7 +174,7 @@ func (e *thinPoolRaceEnv) waitForQueuedReconciles() {
 
 	e.consumeOnce.Do(func() {
 		assert.Eventually(e.t, func() bool {
-			return e.r.thinPools.refs(racePoolVG, racePoolName) == e.queued
+			return e.r.thinPools.Refs(racePoolVG, racePoolName) == e.queued
 		}, 5*time.Second, time.Millisecond, "the other reconciles of the pool did not wait for the one consuming its space")
 	})
 }
@@ -312,7 +312,7 @@ func TestReconcileLLVCreateFunc_ConcurrentThinVolumesStayWithinAllocationLimit(t
 	assert.Equal(t, 2, succeeded)
 	assert.Equal(t, 1, refused)
 	assert.LessOrEqual(t, env.pool.allocated(), bytesOf("1Gi"))
-	assert.Zero(t, env.r.thinPools.len())
+	assert.Zero(t, env.r.thinPools.Len())
 }
 
 func TestReconcileLLVUpdateFunc_ConcurrentThinExtensionsStayWithinAllocationLimit(t *testing.T) {
@@ -373,24 +373,6 @@ func bytesOf(size string) int64 {
 	return q.Value()
 }
 
-func (l *thinPoolLocks) len() int {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	return len(l.locks)
-}
-
-func (l *thinPoolLocks) refs(vgName, poolName string) int {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	entry, ok := l.locks[thinPoolKey{vgName: vgName, poolName: poolName}]
-	if !ok {
-		return 0
-	}
-	return entry.refs
-}
-
 func TestReconcileLLVCreateFunc_RefusalNamesTheLimitAndTheAllocatedSpace(t *testing.T) {
 	ctx := context.Background()
 	existing := map[string]int64{"race-lv-0": bytesOf("800Mi")}
@@ -418,7 +400,7 @@ func TestReconcileLLVCreateFunc_HeldThinPoolLockDoesNotBlockThickOrOtherPools(t 
 		AllocationLimit: "100%",
 	})
 
-	unlock, err := env.r.thinPools.lock(ctx, racePoolVG, racePoolName)
+	unlock, err := env.r.thinPools.Lock(ctx, racePoolVG, racePoolName)
 	require.NoError(t, err)
 	defer unlock()
 
@@ -467,7 +449,7 @@ func TestReconcileLLVCreateFunc_CancelledWhileWaitingForTheThinPoolLock(t *testi
 	env := newThinPoolRaceEnv(t, "100%", nil)
 	llv := env.newLLV(context.Background(), t, "race-lv-0", "400Mi", nil)
 
-	unlock, err := env.r.thinPools.lock(context.Background(), racePoolVG, racePoolName)
+	unlock, err := env.r.thinPools.Lock(context.Background(), racePoolVG, racePoolName)
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -477,7 +459,7 @@ func TestReconcileLLVCreateFunc_CancelledWhileWaitingForTheThinPoolLock(t *testi
 		result <- err
 	}()
 	require.Eventually(t, func() bool {
-		return env.r.thinPools.refs(racePoolVG, racePoolName) == 2
+		return env.r.thinPools.Refs(racePoolVG, racePoolName) == 2
 	}, 5*time.Second, time.Millisecond)
 	cancel()
 
@@ -491,7 +473,7 @@ func TestReconcileLLVCreateFunc_CancelledWhileWaitingForTheThinPoolLock(t *testi
 
 	unlock()
 	unlock()
-	assert.Zero(t, env.r.thinPools.len())
+	assert.Zero(t, env.r.thinPools.Len())
 }
 
 func TestReconcileLLVCreateFunc_CloneIsCountedAtItsSourceSize(t *testing.T) {
@@ -554,5 +536,5 @@ func TestReconcileLLVCreateFunc_FailedPoolListingCreatesNothing(t *testing.T) {
 	assert.ErrorIs(t, err, env.pool.listErr)
 	assert.ErrorContains(t, err, "unable to count the space allocated in thin pool race-pool of VG race-vg")
 	assert.Zero(t, env.pool.allocated())
-	assert.Zero(t, env.r.thinPools.len())
+	assert.Zero(t, env.r.thinPools.Len())
 }

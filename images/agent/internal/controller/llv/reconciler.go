@@ -40,6 +40,7 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/repository"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/thinpoolalloc"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 )
 
@@ -67,7 +68,7 @@ type Reconciler struct {
 	cfg             ReconcilerConfig
 	runningCleanups cleanups
 	commands        utils.Commands
-	thinPools       thinPoolLocks
+	thinPools       *thinpoolalloc.Locks
 }
 
 var errAlreadyRunning = errors.New("reconcile in progress")
@@ -78,6 +79,7 @@ type ReconcilerConfig struct {
 	Loglevel                logger.Verbosity
 	VolumeGroupScanInterval time.Duration
 	LLVRequeueInterval      time.Duration
+	ThinPools               *thinpoolalloc.Locks
 }
 
 func NewReconciler(
@@ -89,6 +91,10 @@ func NewReconciler(
 	recorder conditions.EventRecorder,
 	cfg ReconcilerConfig,
 ) *Reconciler {
+	thinPools := cfg.ThinPools
+	if thinPools == nil {
+		thinPools = &thinpoolalloc.Locks{}
+	}
 	return &Reconciler{
 		cl:  cl,
 		log: log.Named(ReconcilerName),
@@ -109,7 +115,8 @@ func NewReconciler(
 		runningCleanups: cleanups{
 			status: make(map[cleanupsKey]cleanupStatus, 50),
 		},
-		commands: commands,
+		commands:  commands,
+		thinPools: thinPools,
 	}
 }
 

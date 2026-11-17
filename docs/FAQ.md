@@ -192,6 +192,8 @@ A request that does not fit into `availableSpace` is refused rather than carried
 - an LVMLogicalVolumeSnapshot stays `Pending` until `availableSpace` is at least the size of the source volume: a snapshot is counted at the full size of its source, although it shares the data with it;
 - the scheduler extender does not place a new volume on a node whose thin pool lacks the space.
 
+The agent checks a new volume, an expansion and a snapshot against what LVM reports at that moment rather than against `availableSpace`, which only the periodic Volume Group scan refreshes, and handles the requests to one thin pool one at a time. Volumes, expansions of volumes sized in percent and snapshots requested at the same time therefore cannot exceed the limit together.
+
 The value can be changed at any time, for both a new and an existing thin pool. The agent applies it on its next pass, and `status.thinPools[].allocationLimit` and `availableSpace` show the result:
 
 ```shell

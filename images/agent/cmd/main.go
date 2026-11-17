@@ -49,6 +49,7 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/kubutils"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/scanner"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/thinpoolalloc"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 	"github.com/deckhouse/sds-node-configurator/lib/go/common/pkg/feature"
 )
@@ -327,6 +328,8 @@ func run() int {
 		}
 	}()
 
+	thinPools := &thinpoolalloc.Locks{}
+
 	err = controller.AddReconciler(
 		mgr,
 		log,
@@ -342,6 +345,7 @@ func run() int {
 				VolumeGroupScanInterval: cfgParams.VolumeGroupScanInterval,
 				Loglevel:                cfgParams.Loglevel,
 				LLVRequeueInterval:      cfgParams.LLVRequeueInterval,
+				ThinPools:               thinPools,
 			},
 		),
 	)
@@ -363,6 +367,7 @@ func run() int {
 			llv_extender.ReconcilerConfig{
 				NodeName:                cfgParams.NodeName,
 				VolumeGroupScanInterval: cfgParams.VolumeGroupScanInterval,
+				ThinPools:               thinPools,
 			},
 		),
 	)
@@ -371,7 +376,7 @@ func run() int {
 		return 1
 	}
 
-	addLLVSReconciler(mgr, log, metrics, sdsCache, commands, cfgParams)
+	addLLVSReconciler(mgr, log, metrics, sdsCache, commands, cfgParams, thinPools)
 
 	if err = mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		log.Error("unable to mgr.AddHealthzCheck", logger.Err(err))

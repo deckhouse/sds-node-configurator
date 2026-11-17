@@ -34,25 +34,28 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/repository"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/thinpoolalloc"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 )
 
 const ReconcilerName = "lvm-logical-volume-extender-controller"
 
 type Reconciler struct {
-	cl       client.Client
-	log      logger.Logger
-	lvgCl    *repository.LVGClient
-	llvCl    *repository.LLVClient
-	metrics  *monitoring.Metrics
-	sdsCache *cache.Cache
-	cfg      ReconcilerConfig
-	commands utils.Commands
+	cl        client.Client
+	log       logger.Logger
+	lvgCl     *repository.LVGClient
+	llvCl     *repository.LLVClient
+	metrics   *monitoring.Metrics
+	sdsCache  *cache.Cache
+	cfg       ReconcilerConfig
+	commands  utils.Commands
+	thinPools *thinpoolalloc.Locks
 }
 
 type ReconcilerConfig struct {
 	NodeName                string
 	VolumeGroupScanInterval time.Duration
+	ThinPools               *thinpoolalloc.Locks
 }
 
 func NewReconciler(
@@ -64,6 +67,10 @@ func NewReconciler(
 	recorder conditions.EventRecorder,
 	cfg ReconcilerConfig,
 ) controller.Reconciler[*v1alpha1.LVMVolumeGroup] {
+	thinPools := cfg.ThinPools
+	if thinPools == nil {
+		thinPools = &thinpoolalloc.Locks{}
+	}
 	return &Reconciler{
 		cl:  cl,
 		log: log.Named(ReconcilerName),
@@ -75,11 +82,12 @@ func NewReconciler(
 			ReconcilerName,
 			recorder,
 		),
-		llvCl:    repository.NewLLVClient(cl, log, recorder),
-		metrics:  metrics,
-		sdsCache: sdsCache,
-		cfg:      cfg,
-		commands: commands,
+		llvCl:     repository.NewLLVClient(cl, log, recorder),
+		metrics:   metrics,
+		sdsCache:  sdsCache,
+		cfg:       cfg,
+		commands:  commands,
+		thinPools: thinPools,
 	}
 }
 
@@ -221,38 +229,16 @@ func (r *Reconciler) ReconcileLVMLogicalVolumeExtension(
 			continue
 		}
 
-		extendingSize := alignedRequestedSize.Value() - lv.Data.LVSize.Value()
-		freeSpace := utils.GetFreeLVGSpaceForLLV(lvg, &llv)
-		if extendingSize > freeSpace.Value() {
-			err = errors.New("not enough space")
-			log.Error(fmt.Sprintf("unable to extend the LV %s of the LVMLogicalVolume %s by %s, free space: %s", llv.Spec.ActualLVNameOnTheNode, llv.Name, resource.NewQuantity(extendingSize, resource.BinarySI).String(), freeSpace.String()), logger.Err(err))
-			err = r.llvCl.UpdatePhaseIfNeeded(ctx, &llv, v1alpha1.PhaseFailed, fmt.Sprintf("unable to extend LV, err: %s", err.Error()))
-			if err != nil {
-				log.Error(fmt.Sprintf("unable to update the LVMLogicalVolume %s", llv.Name), logger.Err(err))
+		if failure, err := r.extendLV(ctx, lvg, &llv, lv.Data.LVSize, alignedRequestedSize); failure != "" || err != nil {
+			if failure != "" {
+				if err := r.llvCl.UpdatePhaseIfNeeded(ctx, &llv, v1alpha1.PhaseFailed, failure); err != nil {
+					log.Error(fmt.Sprintf("unable to update the LVMLogicalVolume %s", llv.Name), logger.Err(err))
+				}
 			}
 			// Retry: the numbers this verdict rests on - the group's free space
 			// and the cached LV - are both refreshed out of band, so the same
 			// volume can well fit on the next pass. Without a retry the failure
 			// waits for an unrelated event to disturb the group.
-			shouldRetry = true
-			continue
-		}
-
-		log.Info(fmt.Sprintf("the LVMLogicalVolume %s should be extended from %s to %s size", llv.Name, lv.Data.LVSize.String(), alignedRequestedSize.String()))
-		err = r.llvCl.UpdatePhaseIfNeeded(ctx, &llv, v1alpha1.PhaseResizing, "")
-		if err != nil {
-			log.Error(fmt.Sprintf("unable to update the LVMLogicalVolume %s", llv.Name), logger.Err(err))
-			shouldRetry = true
-			continue
-		}
-
-		cmd, err := r.commands.ExtendLV(alignedRequestedSize.Value(), lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
-		if err != nil {
-			log.Error(fmt.Sprintf("unable to extend LV %s of the LVMLogicalVolume %s, cmd: %s", llv.Spec.ActualLVNameOnTheNode, llv.Name, cmd), logger.Err(err))
-			err = r.llvCl.UpdatePhaseIfNeeded(ctx, &llv, v1alpha1.PhaseFailed, fmt.Sprintf("unable to extend LV, err: %s", err.Error()))
-			if err != nil {
-				log.Error(fmt.Sprintf("unable to update the LVMLogicalVolume %s", llv.Name), logger.Err(err))
-			}
 			shouldRetry = true
 			continue
 		}
@@ -279,6 +265,56 @@ func (r *Reconciler) ReconcileLVMLogicalVolumeExtension(
 		}
 	}
 	return shouldRetry
+}
+
+func (r *Reconciler) extendLV(
+	ctx context.Context,
+	lvg *v1alpha1.LVMVolumeGroup,
+	llv *v1alpha1.LVMLogicalVolume,
+	lvSize, size resource.Quantity,
+) (string, error) {
+	log := r.log
+
+	if llv.Spec.Type == internal.Thin && llv.Spec.Thin != nil {
+		unlock, err := r.thinPools.Lock(ctx, lvg.Spec.ActualVGNameOnTheNode, llv.Spec.Thin.PoolName)
+		if err != nil {
+			log.Error(fmt.Sprintf("unable to extend the LV %s of the LVMLogicalVolume %s", llv.Spec.ActualLVNameOnTheNode, llv.Name), logger.Err(err))
+			return "", err
+		}
+		defer unlock()
+
+		err = thinpoolalloc.CheckSpace(log, r.commands, lvg, llv.Spec.Thin.PoolName, llv.Spec.ActualLVNameOnTheNode, "", size)
+		if errors.Is(err, thinpoolalloc.ErrNotEnoughSpace) {
+			log.Error(fmt.Sprintf("unable to extend the LV %s of the LVMLogicalVolume %s to %s", llv.Spec.ActualLVNameOnTheNode, llv.Name, size.String()), logger.Err(err))
+			return fmt.Sprintf("unable to extend LV, err: %s", err.Error()), nil
+		}
+		if err != nil {
+			log.Error(fmt.Sprintf("unable to extend the LV %s of the LVMLogicalVolume %s", llv.Spec.ActualLVNameOnTheNode, llv.Name), logger.Err(err))
+			return "", err
+		}
+	} else {
+		extendingSize := size.Value() - lvSize.Value()
+		freeSpace := utils.GetFreeLVGSpaceForLLV(lvg, llv)
+		if extendingSize > freeSpace.Value() {
+			err := errors.New("not enough space")
+			log.Error(fmt.Sprintf("unable to extend the LV %s of the LVMLogicalVolume %s by %s, free space: %s", llv.Spec.ActualLVNameOnTheNode, llv.Name, resource.NewQuantity(extendingSize, resource.BinarySI).String(), freeSpace.String()), logger.Err(err))
+			return fmt.Sprintf("unable to extend LV, err: %s", err.Error()), nil
+		}
+	}
+
+	log.Info(fmt.Sprintf("the LVMLogicalVolume %s should be extended from %s to %s size", llv.Name, lvSize.String(), size.String()))
+	if err := r.llvCl.UpdatePhaseIfNeeded(ctx, llv, v1alpha1.PhaseResizing, ""); err != nil {
+		log.Error(fmt.Sprintf("unable to update the LVMLogicalVolume %s", llv.Name), logger.Err(err))
+		return "", err
+	}
+
+	cmd, err := r.commands.ExtendLV(size.Value(), lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
+	if err != nil {
+		log.Error(fmt.Sprintf("unable to extend LV %s of the LVMLogicalVolume %s, cmd: %s", llv.Spec.ActualLVNameOnTheNode, llv.Name, cmd), logger.Err(err))
+		return fmt.Sprintf("unable to extend LV, err: %s", err.Error()), nil
+	}
+
+	return "", nil
 }
 
 func (r *Reconciler) getAllLLVsWithPercentSize(ctx context.Context, lvgName string) ([]v1alpha1.LVMLogicalVolume, error) {

@@ -467,6 +467,12 @@ func TestLLVExtenderComparesGrowthWithFreeSpace(t *testing.T) {
 				llv.Spec.Thin = &v1alpha1.LVMLogicalVolumeThinSpec{PoolName: tc.pool.Name}
 				lvData.PoolName = tc.pool.Name
 				lvg.Status.ThinPools = []v1alpha1.LVMVolumeGroupThinPoolStatus{*tc.pool}
+				listing := []internal.LVData{
+					{LVName: tc.pool.Name, VGName: vgNameOnNode, LVAttr: "twi-aotz--", LVSize: tc.pool.ActualSize},
+					lvData,
+					{LVName: "other_lv", VGName: vgNameOnNode, PoolName: tc.pool.Name, LVSize: *resource.NewQuantity(tc.pool.AllocatedSize.Value()-tc.lvSize.Value(), resource.BinarySI)},
+				}
+				mockCmds.EXPECT().GetVGLVs(vgNameOnNode).Return(listing, "lvs", bytes.Buffer{}, nil).AnyTimes()
 			}
 
 			require.NoError(t, r.cl.Create(ctx, llv))
