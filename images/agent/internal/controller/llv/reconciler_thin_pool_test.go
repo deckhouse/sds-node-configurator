@@ -39,6 +39,7 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/mock_utils"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/test_utils"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/thinpoolalloc"
 )
 
 const (
@@ -118,7 +119,7 @@ func newThinPoolRaceEnv(t *testing.T, allocationLimit string, existing map[strin
 
 	mockCmds := mock_utils.NewMockCommands(ctrl)
 	cl := test_utils.NewFakeClient(&v1alpha1.LVMLogicalVolume{})
-	r := NewReconciler(cl, logger.NewNop(), monitoring.GetMetrics(""), cache.New(), mockCmds, nil, ReconcilerConfig{})
+	r := NewReconciler(cl, logger.NewNop(), monitoring.GetMetrics(""), cache.New(), mockCmds, nil, ReconcilerConfig{ThinPools: &thinpoolalloc.Locks{}})
 
 	actualSize := resource.MustParse("1Gi")
 	pool := &fakeThinPool{lvs: map[string]int64{}, poolSize: actualSize.Value()}
@@ -537,4 +538,10 @@ func TestReconcileLLVCreateFunc_FailedPoolListingCreatesNothing(t *testing.T) {
 	assert.ErrorContains(t, err, "unable to count the space allocated in thin pool race-pool of VG race-vg")
 	assert.Zero(t, env.pool.allocated())
 	assert.Zero(t, env.r.thinPools.Len())
+}
+
+func TestNewReconcilerRequiresTheSharedThinPoolLocks(t *testing.T) {
+	assert.Panics(t, func() {
+		NewReconciler(test_utils.NewFakeClient(), logger.NewNop(), monitoring.GetMetrics(""), cache.New(), nil, nil, ReconcilerConfig{})
+	})
 }

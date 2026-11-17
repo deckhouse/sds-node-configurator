@@ -35,6 +35,7 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/mock_utils"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/test_utils"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/thinpoolalloc"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 )
 
@@ -178,7 +179,7 @@ func TestLLVExtenderPercentSizeVolumeIsNotExtended(t *testing.T) {
 		cache.New(),
 		utils.NewCommands(),
 		nil,
-		ReconcilerConfig{NodeName: testNodeName},
+		ReconcilerConfig{NodeName: testNodeName, ThinPools: &thinpoolalloc.Locks{}},
 	).(*Reconciler)
 
 	ctx := context.Background()
@@ -260,7 +261,7 @@ func TestLLVExtenderClearsAStaleFailure(t *testing.T) {
 		cache.New(),
 		utils.NewCommands(),
 		nil,
-		ReconcilerConfig{NodeName: testNodeName},
+		ReconcilerConfig{NodeName: testNodeName, ThinPools: &thinpoolalloc.Locks{}},
 	).(*Reconciler)
 
 	ctx := context.Background()
@@ -438,7 +439,7 @@ func TestLLVExtenderComparesGrowthWithFreeSpace(t *testing.T) {
 				cache.New(),
 				mockCmds,
 				nil,
-				ReconcilerConfig{NodeName: testNodeName},
+				ReconcilerConfig{NodeName: testNodeName, ThinPools: &thinpoolalloc.Locks{}},
 			).(*Reconciler)
 
 			llv := &v1alpha1.LVMLogicalVolume{
@@ -524,7 +525,7 @@ func setupExtenderReconciler() *Reconciler {
 		cache.New(),
 		utils.NewCommands(),
 		nil,
-		ReconcilerConfig{NodeName: testNodeName},
+		ReconcilerConfig{NodeName: testNodeName, ThinPools: &thinpoolalloc.Locks{}},
 	)
 	return r.(*Reconciler)
 }

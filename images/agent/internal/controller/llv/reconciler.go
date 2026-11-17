@@ -91,9 +91,8 @@ func NewReconciler(
 	recorder conditions.EventRecorder,
 	cfg ReconcilerConfig,
 ) *Reconciler {
-	thinPools := cfg.ThinPools
-	if thinPools == nil {
-		thinPools = &thinpoolalloc.Locks{}
+	if cfg.ThinPools == nil {
+		panic("llv: ReconcilerConfig.ThinPools must be the thin pool locks shared by the agent")
 	}
 	return &Reconciler{
 		cl:  cl,
@@ -116,7 +115,7 @@ func NewReconciler(
 			status: make(map[cleanupsKey]cleanupStatus, 50),
 		},
 		commands:  commands,
-		thinPools: thinPools,
+		thinPools: cfg.ThinPools,
 	}
 }
 

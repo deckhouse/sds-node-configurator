@@ -328,7 +328,7 @@ func run() int {
 		}
 	}()
 
-	thinPools := &thinpoolalloc.Locks{}
+	thinPoolCfgs := newThinPoolReconcilerConfigs(cfgParams)
 
 	err = controller.AddReconciler(
 		mgr,
@@ -340,13 +340,7 @@ func run() int {
 			sdsCache,
 			commands,
 			internal.NewEventRecorder(mgr, llv.ReconcilerName),
-			llv.ReconcilerConfig{
-				NodeName:                cfgParams.NodeName,
-				VolumeGroupScanInterval: cfgParams.VolumeGroupScanInterval,
-				Loglevel:                cfgParams.Loglevel,
-				LLVRequeueInterval:      cfgParams.LLVRequeueInterval,
-				ThinPools:               thinPools,
-			},
+			thinPoolCfgs.llv,
 		),
 	)
 	if err != nil {
@@ -364,11 +358,7 @@ func run() int {
 			sdsCache,
 			commands,
 			internal.NewEventRecorder(mgr, llv_extender.ReconcilerName),
-			llv_extender.ReconcilerConfig{
-				NodeName:                cfgParams.NodeName,
-				VolumeGroupScanInterval: cfgParams.VolumeGroupScanInterval,
-				ThinPools:               thinPools,
-			},
+			thinPoolCfgs.llvExtender,
 		),
 	)
 	if err != nil {
@@ -376,7 +366,7 @@ func run() int {
 		return 1
 	}
 
-	addLLVSReconciler(mgr, log, metrics, sdsCache, commands, cfgParams, thinPools)
+	addLLVSReconciler(mgr, log, metrics, sdsCache, commands, thinPoolCfgs.llvs)
 
 	if err = mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		log.Error("unable to mgr.AddHealthzCheck", logger.Err(err))
@@ -498,4 +488,29 @@ func collectFileDevicesToReattach(log logger.Logger, lvgs []v1alpha1.LVMVolumeGr
 	}
 
 	return items
+}
+
+type thinPoolReconcilerConfigs struct {
+	llv         llv.ReconcilerConfig
+	llvExtender llv_extender.ReconcilerConfig
+	llvs        llvsReconcilerConfig
+}
+
+func newThinPoolReconcilerConfigs(cfgParams *config.Config) thinPoolReconcilerConfigs {
+	thinPools := &thinpoolalloc.Locks{}
+	return thinPoolReconcilerConfigs{
+		llv: llv.ReconcilerConfig{
+			NodeName:                cfgParams.NodeName,
+			VolumeGroupScanInterval: cfgParams.VolumeGroupScanInterval,
+			Loglevel:                cfgParams.Loglevel,
+			LLVRequeueInterval:      cfgParams.LLVRequeueInterval,
+			ThinPools:               thinPools,
+		},
+		llvExtender: llv_extender.ReconcilerConfig{
+			NodeName:                cfgParams.NodeName,
+			VolumeGroupScanInterval: cfgParams.VolumeGroupScanInterval,
+			ThinPools:               thinPools,
+		},
+		llvs: newLLVSReconcilerConfig(cfgParams, thinPools),
+	}
 }

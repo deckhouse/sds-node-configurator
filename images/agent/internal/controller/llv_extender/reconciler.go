@@ -67,9 +67,8 @@ func NewReconciler(
 	recorder conditions.EventRecorder,
 	cfg ReconcilerConfig,
 ) controller.Reconciler[*v1alpha1.LVMVolumeGroup] {
-	thinPools := cfg.ThinPools
-	if thinPools == nil {
-		thinPools = &thinpoolalloc.Locks{}
+	if cfg.ThinPools == nil {
+		panic("llv_extender: ReconcilerConfig.ThinPools must be the thin pool locks shared by the agent")
 	}
 	return &Reconciler{
 		cl:  cl,
@@ -87,7 +86,7 @@ func NewReconciler(
 		sdsCache:  sdsCache,
 		cfg:       cfg,
 		commands:  commands,
-		thinPools: thinPools,
+		thinPools: cfg.ThinPools,
 	}
 }
 

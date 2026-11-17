@@ -35,6 +35,7 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/cache"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/test_utils"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/thinpoolalloc"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 )
 
@@ -135,7 +136,7 @@ func TestReconcileLLVDeleteFuncRequeuesWhenTheWaitCannotBeReported(t *testing.T)
 			return errors.New("the API server is unavailable")
 		},
 	})
-	r := NewReconciler(cl, logger.NewNop(), monitoring.GetMetrics(""), cache.New(), utils.NewCommands(), nil, ReconcilerConfig{})
+	r := NewReconciler(cl, logger.NewNop(), monitoring.GetMetrics(""), cache.New(), utils.NewCommands(), nil, ReconcilerConfig{ThinPools: &thinpoolalloc.Locks{}})
 
 	lvg := &v1alpha1.LVMVolumeGroup{Spec: v1alpha1.LVMVolumeGroupSpec{ActualVGNameOnTheNode: "test-vg"}}
 

@@ -303,3 +303,9 @@ func bytesOf(size string) int64 {
 	q := resource.MustParse(size)
 	return q.Value()
 }
+
+func TestNewReconcilerRequiresTheSharedThinPoolLocks(t *testing.T) {
+	assert.Panics(t, func() {
+		NewReconciler(test_utils.NewFakeClient(), logger.NewNop(), monitoring.GetMetrics(""), cache.New(), nil, nil, ReconcilerConfig{})
+	})
+}

@@ -18,6 +18,17 @@ limitations under the License.
 
 package main
 
+import (
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/config"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/thinpoolalloc"
+)
+
+type llvsReconcilerConfig struct{}
+
+func newLLVSReconcilerConfig(*config.Config, *thinpoolalloc.Locks) llvsReconcilerConfig {
+	return llvsReconcilerConfig{}
+}
+
 func addLLVSReconciler(_ ...any) {
 	// noop
 }

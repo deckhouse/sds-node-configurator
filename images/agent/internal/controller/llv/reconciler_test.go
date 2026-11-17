@@ -36,6 +36,7 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/mock_utils"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/test_utils"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/thinpoolalloc"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 )
 
@@ -1047,7 +1048,7 @@ func newClonedVolumeEnv(ctx context.Context, t *testing.T, requestedSize string)
 
 	mockCmds := mock_utils.NewMockCommands(ctrl)
 	cl := test_utils.NewFakeClient(&v1alpha1.LVMLogicalVolume{})
-	r := NewReconciler(cl, logger.NewNop(), monitoring.GetMetrics(""), cache.New(), mockCmds, nil, ReconcilerConfig{})
+	r := NewReconciler(cl, logger.NewNop(), monitoring.GetMetrics(""), cache.New(), mockCmds, nil, ReconcilerConfig{ThinPools: &thinpoolalloc.Locks{}})
 
 	lvg := &v1alpha1.LVMVolumeGroup{
 		ObjectMeta: v1.ObjectMeta{Name: "test-lvg"},
@@ -1345,7 +1346,7 @@ func newDeletedVolumeEnv(ctx context.Context, t *testing.T) *deletedVolumeEnv {
 
 	mockCmds := mock_utils.NewMockCommands(ctrl)
 	cl := test_utils.NewFakeClient(&v1alpha1.LVMLogicalVolume{})
-	r := NewReconciler(cl, logger.NewNop(), monitoring.GetMetrics(""), cache.New(), mockCmds, nil, ReconcilerConfig{})
+	r := NewReconciler(cl, logger.NewNop(), monitoring.GetMetrics(""), cache.New(), mockCmds, nil, ReconcilerConfig{ThinPools: &thinpoolalloc.Locks{}})
 
 	lvg := &v1alpha1.LVMVolumeGroup{
 		ObjectMeta: v1.ObjectMeta{Name: "test-lvg"},
@@ -1467,5 +1468,5 @@ func setupReconciler() *Reconciler {
 	log := logger.NewNop()
 	metrics := monitoring.GetMetrics("")
 
-	return NewReconciler(cl, log, metrics, cache.New(), utils.NewCommands(), nil, ReconcilerConfig{})
+	return NewReconciler(cl, log, metrics, cache.New(), utils.NewCommands(), nil, ReconcilerConfig{ThinPools: &thinpoolalloc.Locks{}})
 }
