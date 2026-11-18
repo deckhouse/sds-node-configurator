@@ -87,6 +87,7 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 		writeFailAllNodesResponse(w, servingLog, nodeNames, fmt.Sprintf("unable to get managed PVCs: %s", err))
 		return
 	}
+	markPod(w, len(managedPVCs))
 	if len(managedPVCs) == 0 {
 		servingLog.Debug("Pod uses PVCs which are not managed by our modules. Return the same nodes")
 		if err := writeNodeNamesResponse(w, servingLog, nodeNames); err != nil {
@@ -223,6 +224,7 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 // Unlike http.Error (which returns 500 and gets silently ignored due to failurePolicy: Ignore),
 // this approach makes the scheduler see "no suitable nodes" → Pod stays Pending.
 func writeFailAllNodesResponse(w http.ResponseWriter, log logger.Logger, nodeNames []string, reason string) {
+	markFailed(w)
 	failedNodes := make(FailedNodesMap, len(nodeNames))
 	for _, name := range nodeNames {
 		failedNodes[name] = reason

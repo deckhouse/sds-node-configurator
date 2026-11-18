@@ -81,6 +81,7 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
+	markPod(w, len(managedPVCs))
 	if len(managedPVCs) == 0 {
 		servingLog.Debug("Pod uses PVCs which are not managed by our modules. Return the same nodes")
 		if err := writeNodeScoresResponse(w, servingLog, nodeNames, 0); err != nil {

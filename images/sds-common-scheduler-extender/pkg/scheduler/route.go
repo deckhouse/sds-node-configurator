@@ -77,12 +77,12 @@ func (s *scheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "/scheduler/filter":
 		s.filterRequestCount.Add(1)
 		requestLog.Debug("filter route starts handling the request")
-		s.filter(w, r)
+		observeRequest(verbFilter, w, r, s.filter)
 		requestLog.Debug("filter route ends handling the request")
 	case "/scheduler/prioritize":
 		s.prioritizeRequestCount.Add(1)
 		requestLog.Debug("prioritize route starts handling the request")
-		s.prioritize(w, r)
+		observeRequest(verbPrioritize, w, r, s.prioritize)
 		requestLog.Debug("prioritize route ends handling the request")
 	case "/v1/lvg/filter-and-score":
 		s.filterAndScoreRequestCount.Add(1)

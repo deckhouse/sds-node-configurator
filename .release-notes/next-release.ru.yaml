@@ -12,6 +12,7 @@ new_features:
 improvements:
   - "Пока устройство, вышедшее из `blockDeviceSelector`, остаётся в группе томов, условие `VGConfigurationApplied` (причина `ValidationFailed`) называет устройство и то, что мешает: объём данных на его Physical Volume и `pvmove`, который нужно выполнить, либо поле `spec.releaseEmptyBlockDevices`, если Physical Volume пуст."
   - "В `kubectl get bd` появилась колонка `Missing`: `Unknown`, пока устройства нет меньше 10 минут, `True` после этого, пусто у присутствующего устройства. Устаревший дубль BlockDevice теперь легко заметить."
+  - "Планировщик-расширение (scheduler extender) отдаёт гистограмму `sds_common_scheduler_extender_request_duration_seconds`: сколько работают его обработчики `filter` и `prioritize`, с разбивкой по вызову, по тому, монтирует ли под PVC провизионеров модуля (`pod=\"ours\"`) или нет (`pod=\"foreign\"`), по результату и по признаку пробного прогона (dry run). Она показывает, сколько стоит вызов, который kube-scheduler делает для каждого пода."
 
 fixes:
   - "BlockDevice неконсумабельного устройства, переиспользованный под старым именем после смены имени устройства, больше не получает `Missing` и не теряет его заново при каждом проходе обнаружения."

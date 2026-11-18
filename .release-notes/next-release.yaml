@@ -12,6 +12,7 @@ new_features:
 improvements:
   - "While a device that has left `blockDeviceSelector` is still in the Volume Group, the `VGConfigurationApplied` condition (reason `ValidationFailed`) names the device and what is in the way: the amount of data on its Physical Volume and the `pvmove` to run, or the `spec.releaseEmptyBlockDevices` field when the Physical Volume is empty."
   - "`kubectl get bd` shows the new `Missing` column: `Unknown` while the device is absent for less than 10 minutes, `True` after that, empty for a device that is present. A stale duplicate of a BlockDevice is now easy to spot."
+  - "The scheduler extender exports the `sds_common_scheduler_extender_request_duration_seconds` histogram: how long its `filter` and `prioritize` handlers take, split by the verb, by whether the Pod mounts a PVC of the module's provisioners (`pod=\"ours\"`) or not (`pod=\"foreign\"`), by the result and by whether the request is a dry run. It shows what the call that kube-scheduler makes for every Pod costs."
 
 fixes:
   - "A BlockDevice of a non-consumable device that was reused under its old name after the device name changed is no longer marked `Missing` and cleared again on every discovery pass."
