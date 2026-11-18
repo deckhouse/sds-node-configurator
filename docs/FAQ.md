@@ -123,6 +123,8 @@ Every removal is recorded as an Event with the reason `AgentFinalizerReleased`. 
 d8 k -n default get events --field-selector reason=AgentFinalizerReleased
 ```
 
+Deleting an LVMLogicalVolume or LVMLogicalVolumeSnapshot and removing its finalizer by hand needs the `ClusterAdmin` access level, or the superadmin role of the storage subsystem in the role model of DKP 1.78 and later: the module and the CSI drivers create and keep these resources, so `ClusterEditor` only reads them. Deleting an LVMVolumeGroup needs `ClusterEditor`.
+
 To clean up after a node that will not come back:
 
 1. Make sure the node is gone and will not return under the same name:
@@ -803,6 +805,8 @@ Keep in mind:
 A LUN that a CSI driver hands out as a volume must never become a [BlockDevice](./cr.html#blockdevice): an [LVMVolumeGroup](./cr.html#lvmvolumegroup) whose `blockDeviceSelector` matches it would run `pvcreate` or `vgextend` on it and overwrite the data of the volume.
 
 A driver hides its LUNs with a [BlockDeviceFilter](./cr.html#blockdevicefilter) resource. Its `blockDeviceSelector` selects the devices to keep, by the [labels of BlockDevice resources](#what-labels-are-added-by-the-controller-to-blockdevice-resources). The agent combines the selectors of all BlockDeviceFilter resources with a logical AND: a device becomes a BlockDevice only when every filter keeps it, and an existing BlockDevice that a filter no longer keeps is deleted. One driver's filter therefore cannot reveal a device another driver hides. A `matchExpressions` entry with `In` or `NotIn` and an empty `values` list is ignored.
+
+Creating, changing or deleting a BlockDeviceFilter by hand needs the `ClusterAdmin` access level, or the superadmin role of the storage subsystem in the role model of DKP 1.78 and later: changing or deleting the filter of a driver can turn the LUNs of its volumes into BlockDevice resources that an LVMVolumeGroup may take. `ClusterEditor` and the manager of the storage subsystem only read filters.
 
 The drivers of the Deckhouse storage modules use one of the following rules, or several of them at once:
 

@@ -1,0 +1,44 @@
+{{- if eq (include "sds-node-configurator.rbacv2_new_scheme" .) "true" }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: d8:system-capability:sds-node-configurator:superadmin
+  {{- include "helm_lib_module_labels" (list . (dict "rbac.deckhouse.io/aggregate-to-storage-as" "superadmin" "rbac.deckhouse.io/capability" "system-capability.sds-node-configurator.superadmin" "rbac.deckhouse.io/kind" "capability" "rbac.deckhouse.io/namespace" "d8-sds-node-configurator" "rbac.deckhouse.io/scope" "system")) | nindent 2 }}
+  annotations:
+    en.meta.deckhouse.io/description: "Delete LVMLogicalVolume and LVMLogicalVolumeSnapshot resources the agent keeps and remove their finalizers, for example after a node is removed from the cluster, and manage BlockDeviceFilter resources, which decide the devices the module may take, the LUNs that CSI drivers hide included."
+    en.meta.deckhouse.io/title: "Module sds-node-configurator: manage logical volumes and block device filters"
+    ru.meta.deckhouse.io/description: "Удаление ресурсов LVMLogicalVolume и LVMLogicalVolumeSnapshot, которые ведёт агент, и снятие их финализаторов, например после удаления узла из кластера, а также управление ресурсами BlockDeviceFilter, которые определяют, какие устройства может занять модуль, в том числе LUN, скрытые CSI-драйверами."
+    ru.meta.deckhouse.io/title: "Модуль sds-node-configurator: управление логическими томами и фильтрами блочных устройств"
+rules:
+- apiGroups:
+  - storage.deckhouse.io
+  resources:
+  - blockdevicefilters
+  verbs:
+  - create
+  - delete
+  - deletecollection
+  - patch
+  - update
+- apiGroups:
+  - storage.deckhouse.io
+  resources:
+  - lvmlogicalvolumes
+  verbs:
+  - create
+  - delete
+  - deletecollection
+  - patch
+  - update
+- apiGroups:
+  - storage.deckhouse.io
+  resources:
+  - lvmlogicalvolumesnapshots
+  verbs:
+  - create
+  - delete
+  - deletecollection
+  - patch
+  - update
+{{- end }}

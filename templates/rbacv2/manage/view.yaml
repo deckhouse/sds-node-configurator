@@ -85,6 +85,7 @@ rules:
   - apiGroups:
       - storage.deckhouse.io
     resources:
+      - blockdevicefilters
       - blockdevices
       - lvmvolumegroups
       - lvmvolumegroupsets

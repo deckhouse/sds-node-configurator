@@ -21,23 +21,11 @@ resources:
   - group: storage.deckhouse.io
     resource: blockdevices
     system:
-      manager:
-        - create
-        - delete
-        - deletecollection
-        - patch
-        - update
       viewer:
         - get
         - list
         - watch
     legacy:
-      ClusterEditor:
-        - create
-        - delete
-        - deletecollection
-        - patch
-        - update
       User:
         - get
         - list
@@ -45,7 +33,7 @@ resources:
   - group: storage.deckhouse.io
     resource: lvmlogicalvolumes
     system:
-      manager:
+      superadmin:
         - create
         - delete
         - deletecollection
@@ -56,7 +44,7 @@ resources:
         - list
         - watch
     legacy:
-      ClusterEditor:
+      ClusterAdmin:
         - create
         - delete
         - deletecollection
@@ -69,7 +57,7 @@ resources:
   - group: storage.deckhouse.io
     resource: lvmlogicalvolumesnapshots
     system:
-      manager:
+      superadmin:
         - create
         - delete
         - deletecollection
@@ -80,7 +68,7 @@ resources:
         - list
         - watch
     legacy:
-      ClusterEditor:
+      ClusterAdmin:
         - create
         - delete
         - deletecollection
@@ -141,7 +129,7 @@ resources:
   - group: storage.deckhouse.io
     resource: blockdevicefilters
     system:
-      manager:
+      superadmin:
         - create
         - delete
         - deletecollection
@@ -152,7 +140,7 @@ resources:
         - list
         - watch
     legacy:
-      ClusterEditor:
+      ClusterAdmin:
         - create
         - delete
         - deletecollection
@@ -162,6 +150,14 @@ resources:
         - get
         - list
         - watch
+capabilities:
+  system.superadmin:
+    title:
+      en: 'Module sds-node-configurator: manage logical volumes and block device filters'
+      ru: 'Модуль sds-node-configurator: управление логическими томами и фильтрами блочных устройств'
+    description:
+      en: 'Delete LVMLogicalVolume and LVMLogicalVolumeSnapshot resources the agent keeps and remove their finalizers, for example after a node is removed from the cluster, and manage BlockDeviceFilter resources, which decide the devices the module may take, the LUNs that CSI drivers hide included.'
+      ru: 'Удаление ресурсов LVMLogicalVolume и LVMLogicalVolumeSnapshot, которые ведёт агент, и снятие их финализаторов, например после удаления узла из кластера, а также управление ресурсами BlockDeviceFilter, которые определяют, какие устройства может занять модуль, в том числе LUN, скрытые CSI-драйверами.'
 serviceAccounts:
   - name: agent
     path: agent
