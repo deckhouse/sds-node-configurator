@@ -1,33 +1,21 @@
+# Draft scaffold for the next release. Before tagging, rename to vX.Y.Z.yaml
+# (the file name must match the git tag) and fill it in.
 date: "2026-xx-xx"
-summary: "An LVMVolumeGroup can now let the agent release the empty Physical Volume of a device taken out of its selector, a stale duplicate BlockDevice of a device that changed its identity is now deleted by the agent, and `kubectl get bd` shows the Missing condition. The node's own LVM no longer autoactivates Volume Groups of nested clusters."
-highlights:
-  - "The new `spec.releaseEmptyBlockDevices` field of LVMVolumeGroup lets the agent remove from the Volume Group the empty Physical Volume of a device that has left `blockDeviceSelector`."
-  - "A Missing BlockDevice whose device lives on under another BlockDevice is deleted after `missingBlockDeviceRetentionHours` instead of being kept for as long as its LVMVolumeGroup exists."
-  - "`kubectl get bd` has a new `Missing` column."
-  - "The node's LVM now autoactivates only the Volume Groups the node boots from and those with the module's tag, so the Volume Groups of nested clusters on LUNs and other block devices of the node are no longer activated on the node."
+summary: ""
+highlights: []
 
-new_features:
-  - "The new `spec.releaseEmptyBlockDevices` field of LVMVolumeGroup (and of `spec.lvmVolumeGroupTemplate` of LVMVolumeGroupSet) lets the agent take a block device out of a Volume Group with `vgreduce` and `pvremove` after it no longer matches `blockDeviceSelector`. It is off by default. The agent acts only when the BlockDevice exists and has no `Missing` condition, no other BlockDevice on the node carries the same Physical Volume, the Physical Volume is found by its UUID and is empty (`pv_used` is read from LVM right before `vgreduce`), the Volume Group carries the tag of this LVMVolumeGroup, is neither shared nor owned by another host and keeps at least one other Physical Volume, no `pvmove` is running, no thin pool sized as a percentage would outgrow its share of the smaller Volume Group, and all of this held on two reconciliation passes at least a minute apart. A Physical Volume that holds data is never touched. File devices are not affected."
-
-improvements:
-  - "While a device that has left `blockDeviceSelector` is still in the Volume Group, the `VGConfigurationApplied` condition (reason `ValidationFailed`) names the device and what is in the way: the amount of data on its Physical Volume and the `pvmove` to run, or the `spec.releaseEmptyBlockDevices` field when the Physical Volume is empty."
-  - "`kubectl get bd` shows the new `Missing` column: `Unknown` while the device is absent for less than 10 minutes, `True` after that, empty for a device that is present. A stale duplicate of a BlockDevice is now easy to spot."
-  - "The scheduler extender exports the `sds_common_scheduler_extender_request_duration_seconds` histogram: how long its `filter` and `prioritize` handlers take, split by the verb, by whether the Pod mounts a PVC of the module's provisioners (`pod=\"ours\"`) or not (`pod=\"foreign\"`), by the result and by whether the request is a dry run. It shows what the call that kube-scheduler makes for every Pod costs."
-
-fixes:
-  - "A BlockDevice of a non-consumable device that was reused under its old name after the device name changed is no longer marked `Missing` and cleared again on every discovery pass."
-  - "A `Missing` BlockDevice that names an existing LVMVolumeGroup in `status.lvmVolumeGroupName` is now deleted after `missingBlockDeviceRetentionHours` when the same device (same Physical Volume UUID, partition UUID, or WWN with serial) is present on the node under another BlockDevice and no LVMVolumeGroup lists the stale one in `status.nodes`. Before, such a duplicate stayed forever. A `Missing` BlockDevice with no live counterpart is kept as before."
-  - "On nodes with the distribution's lvm2 older than 2.03.12 installed (for example, Ubuntu 22.04 with lvm2 2.03.11), every LVMVolumeGroup of the node was `NotReady` with the `CacheEmpty` reason in v0.9.1–v0.9.3: the module's lvm handed each command over to the node's own `/usr/sbin/lvm`, which does not know the `--devicesfile` option. The agent now always runs the lvm the module installs (2.03.42), as it did before v0.7.0, whatever lvm2 the node has."
-  - "Automatic expansion of a thin `LVMLogicalVolume` sized in percent and creation of an `LVMLogicalVolumeSnapshot` no longer push a thin pool over its `allocationLimit` when they run at the same time as other requests to that pool. v0.9.2 fixed this for creation, expansion and cloning of `LVMLogicalVolume` resources only; these two paths still checked `status.thinPools[].availableSpace`, which only the periodic Volume Group scan refreshes. They now wait for the other requests to the same thin pool and check the space against what LVM reports. An expansion that does not fit goes to `Failed` with `not enough space` and is retried; a snapshot that does not fit stays `Pending` with the allocated and the allowed size in its reason and is retried."
-  - "Below DKP 1.78 the viewer and the manager of the storage subsystem now read `BlockDeviceFilter`, as on DKP 1.78 and later."
-  - "`status.thinPools[].usedSize` of LVMVolumeGroup now follows the data written to thin volumes. The agent used to read LVM only after a block device event on the node, such as the creation of a logical volume or a snapshot, or after a restart, so writing to existing thin volumes left the value unchanged for as long as nothing else happened on the node. The agent now also scans the node every 30 seconds without events and updates `usedSize` when it has changed by at least 1% of the thin pool or the pool has filled up; any other change of the status updates it as well. The `sds_node_configurator_lvm_thin_pool_used_bytes`, `sds_node_configurator_lvm_thin_pool_used_percent` and `sds_node_configurator_lvm_thin_pool_metadata_used_percent` metrics are refreshed on the same scan."
-
-breaking:
-  - "The module now sets `activation/auto_activation_volume_list` in `/etc/lvm/lvm.conf` of every node with the distribution's lvm2 installed. The list holds the Volume Groups the node boots from (under mounted file systems, swap, `/etc/fstab`, and the `root=`, `resume=`, `rd.lvm.vg=` and `rd.lvm.lv=` kernel parameters) and `@storage.deckhouse.io/enabled=true`. Any other Volume Group, including one created on the node by hand, is no longer activated at boot or when its devices appear; `vgchange -ay` still activates it. Before, the node autoactivated every Volume Group it saw, including those of nested clusters on LUNs and other block devices of the node."
-
-security:
-  - "`ClusterEditor` and the manager of the storage subsystem in the RBACv2 role model no longer create, change or delete `BlockDevice`, `LVMLogicalVolume` and `LVMLogicalVolumeSnapshot`. The agent, the controller and the CSI drivers create and keep them, and the documentation of `BlockDevice` forbids changing it by hand. `LVMLogicalVolume` and `LVMLogicalVolumeSnapshot` are now changed from `ClusterAdmin` up (on DKP 1.78 and later also by the new `d8:system-capability:sds-node-configurator:superadmin` capability of the storage superadmin), which the procedure for a removed node in the FAQ needs; `BlockDevice` is changed by nobody but `SuperAdmin`. Every level keeps reading them. `BlockDeviceFilter` is also changed from `ClusterAdmin` up (on DKP 1.78 and later also by the same capability) instead of from `ClusterEditor` and the storage manager: changing or deleting the filter of a CSI driver can turn the LUNs of its volumes into `BlockDevice` resources that an `LVMVolumeGroup` may take. Every level keeps reading it."
-
-upgrade_notes:
-  - "Before rebooting a node after the update, check the Volume Groups created on it outside the module: `lvmconfig activation/auto_activation_volume_list` shows what the node will autoactivate. Add a missing Volume Group to `auto_activation_volume_list` in `/etc/lvm/lvm.conf` (the module keeps entries it finds there) or, if the module is to manage it, tag it with `storage.deckhouse.io/enabled=true`. Otherwise its Logical Volumes stay inactive after the reboot, and a file system on them in `/etc/fstab` without `nofail` stops the boot. A list the administrator has already set is extended, not replaced. See the FAQ section \"Which Volume Groups does the node activate on its own?\"."
-  - "The `user-authz` access to the module changes: `ClusterEditor` no longer writes `BlockDevice`, `LVMLogicalVolume` and `LVMLogicalVolumeSnapshot` and keeps reading them; `ClusterAdmin` still writes `LVMLogicalVolume` and `LVMLogicalVolumeSnapshot` but no longer `BlockDevice`. `ClusterEditor` no longer creates, changes or deletes `BlockDeviceFilter` and keeps reading it; `ClusterAdmin` does. In the RBACv2 role model the storage manager loses the same rights, and on DKP 1.78 and later the storage superadmin gets `LVMLogicalVolume`, `LVMLogicalVolumeSnapshot` and `BlockDeviceFilter`. `LVMVolumeGroup` and `LVMVolumeGroupSet` keep their levels. Deleting a logical volume or removing its finalizer after a node is gone now needs `ClusterAdmin`, as the FAQ says."
+# Optional sections — delete rather than leave empty.
+# new_features: []
+# improvements: []
+# fixes: []
+# security: []
+# breaking: []
+# upgrade_notes: []
+# known_issues: []
+# docs: []
+# dependencies:
+#   - name: component
+#     from: "1.0"
+#     to: "1.1"
+#     changelog_url: "https://..."
+#     notes: "..."
