@@ -205,7 +205,7 @@ func NewConfig() (*Config, error) {
 	if thrInt == "" {
 		cfg.ThrottleInterval = 3 * time.Second
 	} else {
-		interval, err := strconv.Atoi(scanInt)
+		interval, err := strconv.Atoi(thrInt)
 		if err != nil {
 			return nil, fmt.Errorf("[NewConfig] unable to get %s, error: %w", ThrottleInterval, err)
 		}

@@ -311,3 +311,40 @@ func TestValidateFileDevicesDirectory(t *testing.T) {
 		})
 	}
 }
+
+func TestNewConfig_ThrottleInterval(t *testing.T) {
+	tests := []struct {
+		name     string
+		throttle string
+		scan     string
+		want     time.Duration
+		wantErr  bool
+	}{
+		{"unset falls back to the default", "", "", 3 * time.Second, false},
+		{"explicit value is honoured", "7", "", 7 * time.Second, false},
+		{"scan interval does not leak into the throttle", "7", "11", 7 * time.Second, false},
+		{"scan interval alone keeps the default throttle", "", "11", 3 * time.Second, false},
+		{"non-numeric is rejected", "7s", "11", 0, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(NodeName, "test-node")
+			t.Setenv(MachineID, "test-id")
+			if tt.throttle != "" {
+				t.Setenv(ThrottleInterval, tt.throttle)
+			}
+			if tt.scan != "" {
+				t.Setenv(ScanInterval, tt.scan)
+			}
+
+			cfg, err := NewConfig()
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, cfg.ThrottleInterval)
+		})
+	}
+}
