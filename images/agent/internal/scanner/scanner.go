@@ -56,9 +56,12 @@ type Scanner interface {
 		discover func(context.Context) (controller.Result, error)) error
 }
 
+const defaultDebounce = time.Second
+
 type scanner struct {
 	commands  utils.Commands
 	deviceMap *udev.DeviceMap
+	debounce  time.Duration
 	// hostMountInfo is the mountinfo both discovery paths take mount points
 	// from: utils.ProcHostMountInfo, a fake one in tests.
 	hostMountInfo string
@@ -120,10 +123,58 @@ func (s *scanner) Run(
 
 	log.Info("start to listen to events")
 
+	remonitor := func() chan struct{} {
+		q := conn.Monitor(eventChan, errChan, matcher)
+		if cfg.Features.NetlinkBlockDeviceDiscovery {
+			devs, crErr := s.collectCrawlerDevices(ctx, matcher)
+			if crErr != nil {
+				log.Error("unable to collect crawler devices", logger.Err(crErr))
+			} else {
+				fillErr := s.deviceMap.FillFromCrawler(ctx, devs)
+				if fillErr != nil {
+					log.Error("Failed to fill device map", logger.Err(fillErr))
+				}
+			}
+			log.Info(fmt.Sprintf("re-crawl found %d block devices", s.deviceMap.Len()))
+		}
+		return q
+	}
+
+	fill := func() error {
+		return s.fillTheCache(ctx, log, sdsCache, cfg, metrics)
+	}
+
+	return s.listen(ctx, log, cfg, t, eventChan, errChan, quit, remonitor, fill, discover)
+}
+
+func (s *scanner) listen(
+	ctx context.Context,
+	log logger.Logger,
+	cfg config.Config,
+	t throttler.Throttler,
+	eventChan chan netlink.UEvent,
+	errChan <-chan error,
+	quit chan struct{},
+	remonitor func() chan struct{},
+	fill func() error,
+	discover func(context.Context) (controller.Result, error),
+) error {
 	// duration debounces a burst of udev events: every event pushes the fill back
 	// by a second so the cache is built once the burst settles.
-	duration := 1 * time.Second
+	duration := s.debounce
+	if duration <= 0 {
+		duration = defaultDebounce
+	}
 	timer := time.NewTimer(duration)
+	defer timer.Stop()
+
+	rescanInterval := cfg.RescanInterval
+	if rescanInterval <= 0 {
+		rescanInterval = config.DefaultRescanInterval
+	}
+	rescan := time.NewTimer(rescanInterval)
+	defer rescan.Stop()
+
 	for {
 		select {
 		case device, open := <-eventChan:
@@ -146,8 +197,9 @@ func (s *scanner) Run(
 			t.Do(func() {
 				log := log
 
+				rescan.Reset(rescanInterval)
 				log.Info("start to fill the cache")
-				err := s.fillTheCache(ctx, log, sdsCache, cfg, metrics)
+				err := fill()
 				if err != nil {
 					log.Error("unable to fill the cache. Retry", logger.Err(err))
 					go func() {
@@ -167,19 +219,7 @@ func (s *scanner) Run(
 
 		case err := <-errChan:
 			log.Error("Monitor udev event error", logger.Err(err))
-			quit = conn.Monitor(eventChan, errChan, matcher)
-			if cfg.Features.NetlinkBlockDeviceDiscovery {
-				devs, crErr := s.collectCrawlerDevices(ctx, matcher)
-				if crErr != nil {
-					log.Error("unable to collect crawler devices", logger.Err(crErr))
-				} else {
-					fillErr := s.deviceMap.FillFromCrawler(ctx, devs)
-					if fillErr != nil {
-						log.Error("Failed to fill device map", logger.Err(fillErr))
-					}
-				}
-				log.Info(fmt.Sprintf("re-crawl found %d block devices", s.deviceMap.Len()))
-			}
+			quit = remonitor()
 			timer.Reset(duration)
 			continue
 
@@ -189,8 +229,9 @@ func (s *scanner) Run(
 			return err
 
 		case <-timer.C:
+			rescan.Reset(rescanInterval)
 			log.Info("events ran out. Start to fill the cache")
-			err := s.fillTheCache(ctx, log, sdsCache, cfg, metrics)
+			err := fill()
 			if err != nil {
 				log.Error("unable to fill the cache after all events passed. Retry", logger.Err(err))
 				timer.Reset(duration)
@@ -205,6 +246,18 @@ func (s *scanner) Run(
 			}
 
 			log.Info("successfully ran the controllers reconcile funcs")
+
+		case <-rescan.C:
+			rescan.Reset(rescanInterval)
+			log.Debug(fmt.Sprintf("no events for %s. Start to re-scan the node", rescanInterval.String()))
+			if err := fill(); err != nil {
+				log.Error("unable to fill the cache on the periodic re-scan", logger.Err(err))
+				continue
+			}
+
+			if err := s.runDiscoveryPass(ctx, log, discover); err != nil {
+				log.Error("unable to run controllers reconciliations", logger.Err(err))
+			}
 		}
 	}
 }

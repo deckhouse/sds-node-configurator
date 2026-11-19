@@ -2275,7 +2275,7 @@ func hasStatusPoolDiff(first, second []v1alpha1.LVMVolumeGroupThinPoolStatus) bo
 
 	for i := range first {
 		if first[i].Name != second[i].Name ||
-			first[i].UsedSize.Value() != second[i].UsedSize.Value() ||
+			hasThinPoolUsedSizeDiff(first[i], second[i]) ||
 			first[i].ActualSize.Value() != second[i].ActualSize.Value() ||
 			first[i].AllocatedSize.Value() != second[i].AllocatedSize.Value() ||
 			first[i].Ready != second[i].Ready ||
@@ -2286,6 +2286,27 @@ func hasStatusPoolDiff(first, second []v1alpha1.LVMVolumeGroupThinPoolStatus) bo
 	}
 
 	return false
+}
+
+const thinPoolUsedSizeDiffPercent = 1
+
+func hasThinPoolUsedSizeDiff(candidate, published v1alpha1.LVMVolumeGroupThinPoolStatus) bool {
+	used, was := candidate.UsedSize.Value(), published.UsedSize.Value()
+	if used == was {
+		return false
+	}
+
+	actual := candidate.ActualSize.Value()
+	if actual <= 0 || used >= actual {
+		return true
+	}
+
+	delta := used - was
+	if delta < 0 {
+		delta = -delta
+	}
+
+	return delta*100 >= actual*thinPoolUsedSizeDiffPercent
 }
 
 func hasEmptyBlockDeviceSelector(lvg *v1alpha1.LVMVolumeGroup) bool {

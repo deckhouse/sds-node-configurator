@@ -80,6 +80,8 @@ const (
 	// MaxMissingBlockDeviceRetentionHours bounds the setting to a year, well
 	// inside what a time.Duration holds; the schema rejects more as well.
 	MaxMissingBlockDeviceRetentionHours = 8760
+
+	DefaultRescanInterval = 30 * time.Second
 )
 
 type Features struct {
@@ -96,6 +98,7 @@ type Config struct {
 	LLVRequeueInterval      time.Duration
 	LLVSRequeueInterval     time.Duration
 	ThrottleInterval        time.Duration
+	RescanInterval          time.Duration
 	CmdDeadlineDuration     time.Duration
 	HealthProbeBindAddress  string
 	Features                Features
@@ -212,6 +215,8 @@ func NewConfig() (*Config, error) {
 
 		cfg.ThrottleInterval = time.Duration(interval) * time.Second
 	}
+
+	cfg.RescanInterval = DefaultRescanInterval
 
 	cmdDur := os.Getenv(CmdDeadlineDuration)
 	if cmdDur == "" {

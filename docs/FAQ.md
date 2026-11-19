@@ -184,7 +184,7 @@ Before removing a thin pool, remove it from the classes of storage that use it: 
 availableSpace = actualSize × allocationLimit − allocatedSize
 ```
 
-`allocatedSize` is the total size of all thin volumes in the pool, snapshots included. `availableSpace` is therefore not the physical free space of the pool: how much of the pool is actually taken by data is shown by `usedSize`.
+`allocatedSize` is the total size of all thin volumes in the pool, snapshots included. `availableSpace` is therefore not the physical free space of the pool: how much of the pool is actually taken by data is shown by `usedSize`. The agent reads `usedSize` from LVM at least every 30 seconds and publishes a change once it reaches 1% of the pool or the pool fills up; the `sds_node_configurator_lvm_thin_pool_used_bytes` metric holds the exact value of the same scan.
 
 The default is `150%`, which allows overprovisioning. `100%` turns it off: the volumes in the pool can then never hold more data than the pool fits. The limit counts data space only. The pool metadata can run out regardless of it, so monitor the thin pool with the `sds_node_configurator_lvm_thin_pool_used_percent` and `sds_node_configurator_lvm_thin_pool_metadata_used_percent` metrics. If the pool runs out of space, writes to its volumes fail and data may be lost.
 

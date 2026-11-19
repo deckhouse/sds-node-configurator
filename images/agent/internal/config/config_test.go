@@ -54,6 +54,7 @@ func TestNewConfig(t *testing.T) {
 			assert.Equal(t, expNodeName, opts.NodeName)
 			assert.Equal(t, expMetricsBindAddress, opts.MetricsBindAddress)
 			assert.Equal(t, expMachineID, opts.MachineID)
+			assert.Equal(t, DefaultRescanInterval, opts.RescanInterval)
 		}
 	})
 
