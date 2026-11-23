@@ -12,7 +12,8 @@ highlights: []
 # breaking: []
 # upgrade_notes: []
 # known_issues: []
-# docs: []
+docs:
+  - "В FAQ описано, что проверить перед выводом узла из кластера: как получить список LVMVolumeGroup, LVMLogicalVolume и LVMLogicalVolumeSnapshot узла, как по финализаторам определить модуль, который использует том, и где модули описывают перенос своих данных с узла."
 # dependencies:
 #   - name: component
 #     from: "1.0"

@@ -100,6 +100,37 @@ d8 k get lvmlogicalvolume <name> -o jsonpath='{.status.conditions[?(@.type=="Rea
 
 The finalizer belongs to the module that put it there and is removed by that module once it has released the volume (for `sds-local-volume`, when the PersistentVolume is deleted). Look for the cause on that side rather than removing the finalizer by hand: doing so lets the agent delete a Logical Volume that may still hold data in use.
 
+## What do I check before taking a node out of the cluster?
+
+The module does not move data between nodes. The Volume Groups and Logical Volumes of a node stay on its disks after the node leaves the cluster, and the data in them is lost when the server is reinstalled, when its disks are wiped or reused, and when the virtual machine of the node is deleted with its disks. Draining and rebooting a node keep the data.
+
+Before you take a node out of the cluster, check what it stores:
+
+1. Find the LVMVolumeGroups of the node:
+
+   ```shell
+   d8 k get lvg -o json | jq -r --arg node <node-name> '.items[] | select(.spec.local.nodeName == $node) | .metadata.name'
+   ```
+
+1. Find the LVMLogicalVolumes in these LVMVolumeGroups and the LVMLogicalVolumeSnapshots on the node:
+
+   ```shell
+   lvgs=$(d8 k get lvg -o json | jq -c --arg node <node-name> '[.items[] | select(.spec.local.nodeName == $node) | .metadata.name]')
+   d8 k get lvmlogicalvolume -o json | jq -r --argjson lvgs "$lvgs" '.items[] | select(.spec.lvmVolumeGroupName as $g | $lvgs | index($g)) | [.metadata.name, .spec.lvmVolumeGroupName, (.metadata.finalizers // [] | join(","))] | @tsv'
+   d8 k get lvmlogicalvolumesnapshot -o json | jq -r --arg node <node-name> '.items[] | select(.status.nodeName == $node) | [.metadata.name, .spec.lvmLogicalVolumeName] | @tsv'
+   ```
+
+   A finalizer other than `storage.deckhouse.io/sds-node-configurator` names the module that uses the volume, for example `storage.deckhouse.io/sds-local-volume-csi` for `sds-local-volume`. The volumes of `sds-replicated-volume` with the LINSTOR control plane have no LVMLogicalVolumes: check them as described in the documentation of that module.
+
+1. Move the data off the node with the module that uses it:
+
+   - `sds-local-volume`: [How do I take a node with volumes out of the cluster?](/modules/sds-local-volume/faq.html#how-do-i-take-a-node-with-volumes-out-of-the-cluster)
+   - `sds-replicated-volume`: [How do I take a node with DRBD replicas out of the cluster?](/modules/sds-replicated-volume/faq.html#how-do-i-take-a-node-with-drbd-replicas-out-of-the-cluster)
+
+1. Take the node out of the cluster as described in [How do I take a node with volume data out of the cluster?](/modules/node-manager/faq.html#how-do-i-take-a-node-with-volume-data-out-of-the-cluster) in the `node-manager` documentation.
+
+What happens to the resources of the node after it is gone is described in [A node was deleted from the cluster. What happens to its resources, and how do I clean them up?](#a-node-was-deleted-from-the-cluster-what-happens-to-its-resources-and-how-do-i-clean-them-up).
+
 ## A node was deleted from the cluster. What happens to its resources, and how do I clean them up?
 
 Deleting the Node object of a node does not delete the module's resources of that node, and does not touch its disks:

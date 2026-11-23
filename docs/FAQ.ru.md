@@ -100,6 +100,37 @@ d8 k get lvmlogicalvolume <name> -o jsonpath='{.status.conditions[?(@.type=="Rea
 
 Финализатор принадлежит модулю, который его поставил, и снимается этим модулем, когда тот отпустил том (у `sds-local-volume` — при удалении PersistentVolume). Ищите причину на его стороне, а не снимайте финализатор вручную: так агент удалит логический том, данные которого, возможно, ещё используются.
 
+## Что проверить перед выводом узла из кластера?
+
+Модуль не переносит данные между узлами. Группы томов и логические тома узла остаются на его дисках после вывода узла из кластера, а данные в них теряются при переустановке ОС на сервере, при очистке или повторном использовании его дисков, а также при удалении виртуальной машины узла вместе с дисками. Вытеснение подов с узла (drain) и перезагрузка узла данные сохраняют.
+
+Перед выводом узла из кластера проверьте, что на нём хранится:
+
+1. Найдите LVMVolumeGroup узла:
+
+   ```shell
+   d8 k get lvg -o json | jq -r --arg node <node-name> '.items[] | select(.spec.local.nodeName == $node) | .metadata.name'
+   ```
+
+1. Найдите LVMLogicalVolume в этих LVMVolumeGroup и LVMLogicalVolumeSnapshot на узле:
+
+   ```shell
+   lvgs=$(d8 k get lvg -o json | jq -c --arg node <node-name> '[.items[] | select(.spec.local.nodeName == $node) | .metadata.name]')
+   d8 k get lvmlogicalvolume -o json | jq -r --argjson lvgs "$lvgs" '.items[] | select(.spec.lvmVolumeGroupName as $g | $lvgs | index($g)) | [.metadata.name, .spec.lvmVolumeGroupName, (.metadata.finalizers // [] | join(","))] | @tsv'
+   d8 k get lvmlogicalvolumesnapshot -o json | jq -r --arg node <node-name> '.items[] | select(.status.nodeName == $node) | [.metadata.name, .spec.lvmLogicalVolumeName] | @tsv'
+   ```
+
+   Финализатор, отличный от `storage.deckhouse.io/sds-node-configurator`, указывает на модуль, который использует том, например `storage.deckhouse.io/sds-local-volume-csi` — на `sds-local-volume`. У томов `sds-replicated-volume` с control plane LINSTOR нет LVMLogicalVolume: проверьте их, как описано в документации этого модуля.
+
+1. Перенесите данные с узла средствами модуля, который их использует:
+
+   - `sds-local-volume` — [«Как вывести из кластера узел с томами?»](/modules/sds-local-volume/faq.html#как-вывести-из-кластера-узел-с-томами);
+   - `sds-replicated-volume` — [«Как вывести из кластера узел с репликами DRBD?»](/modules/sds-replicated-volume/faq.html#как-вывести-из-кластера-узел-с-репликами-drbd).
+
+1. Выведите узел из кластера, как описано в разделе [«Как вывести из кластера узел с данными томов?»](/modules/node-manager/faq.html#как-вывести-из-кластера-узел-с-данными-томов) документации модуля `node-manager`.
+
+Что происходит с ресурсами узла после его удаления, описано в разделе [«Узел удалён из кластера. Что будет с его ресурсами и как их убрать?»](#узел-удалён-из-кластера-что-будет-с-его-ресурсами-и-как-их-убрать).
+
 ## Узел удалён из кластера. Что будет с его ресурсами и как их убрать?
 
 Удаление объекта Node не удаляет ресурсы модуля, относящиеся к этому узлу, и не трогает его диски:

@@ -12,7 +12,8 @@ highlights: []
 # breaking: []
 # upgrade_notes: []
 # known_issues: []
-# docs: []
+docs:
+  - "The FAQ explains what to check before taking a node out of the cluster: how to list the LVMVolumeGroups, LVMLogicalVolumes and LVMLogicalVolumeSnapshots of the node, how to tell from the finalizers which module uses a volume, and where the modules describe moving their data off the node."
 # dependencies:
 #   - name: component
 #     from: "1.0"
