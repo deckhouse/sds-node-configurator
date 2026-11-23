@@ -291,6 +291,8 @@ func run() int {
 		return 1
 	}
 
+	thinPoolCfgs := newThinPoolReconcilerConfigs(cfgParams)
+
 	err = controller.AddReconciler(
 		mgr,
 		log,
@@ -310,6 +312,7 @@ func run() int {
 				FileDevicesDirectory:    cfgParams.FileDevicesDirectory,
 
 				FileDevicesMinFreeSpacePercent: cfgParams.FileDevicesMinFreeSpacePercent,
+				ThinPools:                      thinPoolCfgs.llv.ThinPools,
 			},
 		),
 	)
@@ -331,8 +334,6 @@ func run() int {
 			os.Exit(1)
 		}
 	}()
-
-	thinPoolCfgs := newThinPoolReconcilerConfigs(cfgParams)
 
 	err = controller.AddReconciler(
 		mgr,

@@ -353,7 +353,7 @@ func TestCleanupFileDevices_ActsOnEntriesInTheLegacyBaseDirectory(t *testing.T) 
 // point would be made on that wrong answer.
 //
 // Falling through to the ordinary delete path is not a safer route to the same
-// place, because it reads the same stale cache at every step: getLVForVG finds
+// place, because it reads the same stale cache at every step: lvsOfVG finds
 // no logical volumes and waves the resource past the "delete used LVs first"
 // guard, deleteVGIfExist finds no Volume Group and reports success without doing
 // anything, and for an LVMVolumeGroup with no file devices there is nothing for

@@ -291,6 +291,8 @@ const (
 	// and the scheduler's willingness down with it.
 	ReasonNodeNotDescribed = "NodeNotDescribed"
 
+	ReasonVGHasLogicalVolumes = "VGHasLogicalVolumes"
+
 	MetadataNameLabelKey = "kubernetes.io/metadata.name"
 	HostNameLabelKey     = "kubernetes.io/hostname"
 

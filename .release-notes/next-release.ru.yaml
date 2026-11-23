@@ -7,7 +7,6 @@ highlights: []
 # Необязательные разделы — пустые не оставлять, а удалять.
 # new_features: []
 # improvements: []
-# fixes: []
 # security: []
 # breaking: []
 # upgrade_notes: []
@@ -20,3 +19,6 @@ docs:
 #     to: "1.1"
 #     changelog_url: "https://..."
 #     notes: "..."
+
+fixes:
+  - "Удаление LVMVolumeGroup больше не зависает в `Terminating` на собственном thin-пуле. Раньше агент не удалял группу томов, пока в ней был хоть один логический том, включая thin-пулы из `spec.thinPools`, и удаление завершалось только после `lvremove` пула на узле. Теперь агент удаляет пустые thin-пулы LVMVolumeGroup (перечисленные в `spec.thinPools` или созданные для неё), а затем группу томов. Thin-пул удаляется, только если в нём нет ни одного thin-тома, — это проверяет LVM в той же команде. Thin-пул с томами, а также thin-пулы и логические тома, созданные не этой LVMVolumeGroup, не трогаются: условие `VGConfigurationApplied` перечисляет их, на LVMVolumeGroup записывается Warning-событие `VGHasLogicalVolumes`, и удаление продолжается само, как только они удалены."

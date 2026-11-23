@@ -7,7 +7,6 @@ highlights: []
 # Optional sections — delete rather than leave empty.
 # new_features: []
 # improvements: []
-# fixes: []
 # security: []
 # breaking: []
 # upgrade_notes: []
@@ -20,3 +19,6 @@ docs:
 #     to: "1.1"
 #     changelog_url: "https://..."
 #     notes: "..."
+
+fixes:
+  - "Deleting an LVMVolumeGroup no longer hangs in `Terminating` on its own thin pool. The agent used to refuse to remove the Volume Group while it had any logical volume, the thin pools of `spec.thinPools` included, and only `lvremove` of the pool on the node let the deletion finish. The agent now removes the empty thin pools of the LVMVolumeGroup (those listed in `spec.thinPools` or created for it) and then the Volume Group. A thin pool is removed only while it holds no thin volume, which LVM checks in the same command. A thin pool that holds volumes, and thin pools and logical volumes the LVMVolumeGroup did not create, stay as they are: the `VGConfigurationApplied` condition names them, a `VGHasLogicalVolumes` Warning event is recorded on the LVMVolumeGroup, and the deletion goes on by itself once they are deleted."

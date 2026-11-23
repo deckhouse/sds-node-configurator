@@ -699,7 +699,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 		})
 	})
 
-	t.Run("getLVForVG", func(t *testing.T) {
+	t.Run("lvsOfVG", func(t *testing.T) {
 		r := setupReconciler()
 
 		const (
@@ -719,11 +719,10 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 		}
 
 		r.sdsCache.StoreLVs(lvs, bytes.Buffer{})
-		expected := []string{firstLV}
 
-		actual := r.getLVForVG(vgName)
+		actual := r.lvsOfVG(vgName)
 
-		assert.ElementsMatch(t, expected, actual)
+		assert.Equal(t, []internal.LVData{lvs[0]}, actual)
 	})
 
 	t.Run("countVGSizeByBlockDevices", func(t *testing.T) {

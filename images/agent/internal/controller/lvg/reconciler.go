@@ -39,6 +39,7 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/repository"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/thinpoolalloc"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 )
 
@@ -164,6 +165,9 @@ type Reconciler struct {
 	releaseMu        sync.Mutex
 	releaseSightings map[string]releaseSighting
 	now              func() time.Time
+
+	recorder  conditions.EventRecorder
+	thinPools *thinpoolalloc.Locks
 }
 
 type ReconcilerConfig struct {
@@ -184,6 +188,7 @@ type ReconcilerConfig struct {
 	// for the same reason. Zero disables the reserve, which is only defensible
 	// for a filesystem nothing else on the node depends on.
 	FileDevicesMinFreeSpacePercent int
+	ThinPools                      *thinpoolalloc.Locks
 }
 
 func NewReconciler(
@@ -196,6 +201,10 @@ func NewReconciler(
 	recorder conditions.EventRecorder,
 	cfg ReconcilerConfig,
 ) *Reconciler {
+	thinPools := cfg.ThinPools
+	if thinPools == nil {
+		thinPools = &thinpoolalloc.Locks{}
+	}
 	return &Reconciler{
 		cl:  cl,
 		log: log.Named(ReconcilerName),
@@ -217,6 +226,8 @@ func NewReconciler(
 		aliasResolveFailures: make(map[string]int),
 		noProgressRetries:    make(map[string]int),
 		adoptionTriggered:    make(map[string]struct{}),
+		recorder:             recorder,
+		thinPools:            thinPools,
 	}
 }
 
@@ -642,13 +653,23 @@ func (r *Reconciler) reconcileLVGDeleteFunc(ctx context.Context, lvg *v1alpha1.L
 	}
 
 	log.Debug(fmt.Sprintf("check if VG %s of the LVMVolumeGroup %s uses LVs", lvg.Spec.ActualVGNameOnTheNode, lvg.Name))
-	usedLVs := r.getLVForVG(lvg.Spec.ActualVGNameOnTheNode)
-	if len(usedLVs) > 0 {
-		err := fmt.Errorf("VG %s uses LVs: %v. Delete used LVs first", lvg.Spec.ActualVGNameOnTheNode, usedLVs)
-		log.Error(fmt.Sprintf("unable to reconcile LVG %s", lvg.Name), logger.Err(err))
-		log.Debug(fmt.Sprintf("tries to add the condition %s status False to the LVMVolumeGroup %s due to LV does exist", internal.TypeVGConfigurationApplied, lvg.Name))
-		err = r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonTerminating, err.Error())
+	if lvs := r.lvsOfVG(lvg.Spec.ActualVGNameOnTheNode); len(lvs) > 0 {
+		attempted, err := r.removeOwnEmptyThinPools(ctx, lvg, lvs)
 		if err != nil {
+			log.Error(fmt.Sprintf("unable to remove the empty thin pools of VG %s", lvg.Spec.ActualVGNameOnTheNode), logger.Err(err))
+			if condErr := r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonTerminating, err.Error()); condErr != nil {
+				log.Error(fmt.Sprintf("unable to add the condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name), logger.Err(condErr))
+				return true, condErr
+			}
+			return true, err
+		}
+		if attempted {
+			return true, nil
+		}
+
+		message := vgRemovalBlockedMessage(lvg, lvs)
+		log.Warn(fmt.Sprintf("unable to delete the LVMVolumeGroup %s: %s", lvg.Name, message))
+		if err := r.reportVGRemovalBlocked(ctx, lvg, message); err != nil {
 			log.Error(fmt.Sprintf("unable to add the condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name), logger.Err(err))
 			return true, err
 		}
@@ -1295,7 +1316,7 @@ func (r *Reconciler) deleteLVGIfNeeded(ctx context.Context, lvg *v1alpha1.LVMVol
 		// When the VG turns out to exist (or cannot be ruled out), the whole
 		// reconcile stops here and is requeued. Falling through to the ordinary
 		// delete path would not be a safer route to the same place: every step of
-		// it reads the same stale cache. getLVForVG finds no logical volumes and
+		// it reads the same stale cache. lvsOfVG finds no logical volumes and
 		// waves the resource past the "delete used LVs first" guard, deleteVGIfExist
 		// finds no Volume Group and reports success without doing anything, and for
 		// an LVMVolumeGroup with no file devices cleanupFileDevices has nothing to
@@ -1976,6 +1997,119 @@ func (r *Reconciler) removeThinPoolsDroppedFromSpec(ctx context.Context, lvg *v1
 	return strings.Join(kept, "; "), nil
 }
 
+func (r *Reconciler) lvsOfVG(vgName string) []internal.LVData {
+	lvs, _ := r.sdsCache.GetLVs()
+	own := make([]internal.LVData, 0, len(lvs))
+	for _, lv := range lvs {
+		if lv.VGName == vgName {
+			own = append(own, lv)
+		}
+	}
+	return own
+}
+
+func ownsThinPool(lvg *v1alpha1.LVMVolumeGroup, pool internal.LVData) bool {
+	if !isThinPool(pool) {
+		return false
+	}
+	if hasLVTag(pool.LvTags, declaredThinPoolTag(lvg.Name)) {
+		return true
+	}
+	return slices.ContainsFunc(lvg.Spec.ThinPools, func(tp v1alpha1.LVMVolumeGroupThinPoolSpec) bool {
+		return tp.Name == pool.LVName
+	})
+}
+
+func isHiddenLV(lv internal.LVData) bool {
+	return strings.HasPrefix(lv.LVName, "[")
+}
+
+func (r *Reconciler) removeOwnEmptyThinPools(ctx context.Context, lvg *v1alpha1.LVMVolumeGroup, lvs []internal.LVData) (bool, error) {
+	vgName := lvg.Spec.ActualVGNameOnTheNode
+	attempted := false
+	for _, pool := range lvs {
+		if !ownsThinPool(lvg, pool) || len(thinVolumesOf(lvs, vgName, pool.LVName)) > 0 {
+			continue
+		}
+		attempted = true
+
+		removed, err := r.removeEmptyThinPoolLocked(ctx, vgName, pool.LVName)
+		if err != nil {
+			return attempted, fmt.Errorf("unable to remove the empty thin pool %s of VG %s: %w", pool.LVName, vgName, err)
+		}
+		if removed {
+			r.log.Info(fmt.Sprintf("thin-pool %s of the LVMVolumeGroup %s has been removed before removing VG %s", pool.LVName, lvg.Name, vgName))
+		} else {
+			r.log.Info(fmt.Sprintf("thin-pool %s of VG %s was not removed: it is already gone or holds thin volumes the cache does not show yet", pool.LVName, vgName))
+		}
+	}
+	return attempted, nil
+}
+
+func (r *Reconciler) removeEmptyThinPoolLocked(ctx context.Context, vgName, poolName string) (bool, error) {
+	unlock, err := r.thinPools.Lock(ctx, vgName, poolName)
+	if err != nil {
+		return false, err
+	}
+	defer unlock()
+
+	start := time.Now()
+	removed, cmd, err := r.commands.RemoveEmptyThinPool(ctx, vgName, poolName)
+	r.metrics.UtilsCommandsDuration(ReconcilerName, "lvremove").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
+	r.metrics.UtilsCommandsExecutionCount(ReconcilerName, "lvremove").Inc()
+	if err != nil {
+		r.metrics.UtilsCommandsErrorsCount(ReconcilerName, "lvremove").Inc()
+		r.log.Error(fmt.Sprintf("unable to remove thin-pool %s of VG %s, cmd: %s", poolName, vgName, cmd), logger.Err(err))
+		return false, err
+	}
+	return removed, nil
+}
+
+func vgRemovalBlockedMessage(lvg *v1alpha1.LVMVolumeGroup, lvs []internal.LVData) string {
+	vgName := lvg.Spec.ActualVGNameOnTheNode
+	var blockers []string
+	for _, lv := range lvs {
+		switch {
+		case isHiddenLV(lv), lv.PoolName != "":
+			continue
+		case isThinPool(lv):
+			if volumes := thinVolumesOf(lvs, vgName, lv.LVName); len(volumes) > 0 {
+				slices.Sort(volumes)
+				blockers = append(blockers, fmt.Sprintf("thin pool %s holds %s", lv.LVName, strings.Join(volumes, ", ")))
+			} else if !ownsThinPool(lvg, lv) {
+				blockers = append(blockers, fmt.Sprintf("thin pool %s is not declared by this LVMVolumeGroup", lv.LVName))
+			}
+		default:
+			blockers = append(blockers, fmt.Sprintf("logical volume %s", lv.LVName))
+		}
+	}
+	if len(blockers) == 0 {
+		for _, lv := range lvs {
+			blockers = append(blockers, fmt.Sprintf("logical volume %s", lv.LVName))
+		}
+	}
+	slices.Sort(blockers)
+	return fmt.Sprintf("VG %s is not removed while it has logical volumes the LVMVolumeGroup does not remove itself: %s. Delete them first; the VG is removed once they are gone",
+		vgName, strings.Join(blockers, "; "))
+}
+
+func (r *Reconciler) reportVGRemovalBlocked(ctx context.Context, lvg *v1alpha1.LVMVolumeGroup, message string) error {
+	if c := conditions.Get(lvg.Status.Conditions, internal.TypeVGConfigurationApplied); c != nil &&
+		c.Status == v1.ConditionFalse && c.Reason == internal.ReasonTerminating && c.Message == conditions.TruncateMessage(message) {
+		return nil
+	}
+	if err := r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonTerminating, message); err != nil {
+		return err
+	}
+	conditions.RecordTransition(r.recorder, lvg, nil, v1.Condition{
+		Type:    internal.TypeVGConfigurationApplied,
+		Status:  v1.ConditionFalse,
+		Reason:  internal.ReasonVGHasLogicalVolumes,
+		Message: message,
+	})
+	return nil
+}
+
 func (r *Reconciler) resizePVIfNeeded(ctx context.Context, lvg *v1alpha1.LVMVolumeGroup) error {
 	log := r.log
 
@@ -2110,18 +2244,6 @@ func (r *Reconciler) removeLVGFinalizerIfExist(ctx context.Context, lvg *v1alpha
 	}
 
 	return true, nil
-}
-
-func (r *Reconciler) getLVForVG(vgName string) []string {
-	lvs, _ := r.sdsCache.GetLVs()
-	usedLVs := make([]string, 0, len(lvs))
-	for _, lv := range lvs {
-		if lv.VGName == vgName {
-			usedLVs = append(usedLVs, lv.LVName)
-		}
-	}
-
-	return usedLVs
 }
 
 func (r *Reconciler) deleteVGIfExist(vgName string) error {
