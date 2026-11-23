@@ -23,6 +23,7 @@ import (
 	goruntime "runtime"
 
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	apiruntime "k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
@@ -38,7 +39,6 @@ import (
 	"github.com/deckhouse/sds-common-lib/webhookserver"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/controller/config"
-	"github.com/deckhouse/sds-node-configurator/images/controller/internal"
 	"github.com/deckhouse/sds-node-configurator/images/controller/pkg/controller"
 	"github.com/deckhouse/sds-node-configurator/images/controller/pkg/kubutils"
 	"github.com/deckhouse/sds-node-configurator/images/controller/pkg/monitoring"
@@ -105,6 +105,12 @@ func main() {
 	}
 	log.Info("successfully read scheme CR")
 
+	agentPodSelector, err := labels.Parse(config.AgentPodLabelSelector)
+	if err != nil {
+		log.Error("unable to parse the agent pod label selector", logger.Err(err))
+		os.Exit(1)
+	}
+
 	managerOpts := manager.Options{
 		Scheme:                  scheme,
 		Logger:                  baseLog.GetLogger(),
@@ -117,7 +123,8 @@ func main() {
 			DefaultTransform: cache.TransformStripManagedFields(),
 			ByObject: map[client.Object]cache.ByObject{
 				&v1.Pod{}: {
-					Namespaces: map[string]cache.Config{internal.SdsNodeConfiguratorNamespace: {}},
+					Namespaces: map[string]cache.Config{cfgParams.AgentNamespace: {}},
+					Label:      agentPodSelector,
 				},
 			},
 		},

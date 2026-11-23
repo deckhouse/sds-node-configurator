@@ -83,9 +83,9 @@ func getNodeNamesWithoutAgent(nodes map[string]v1.Node, pods map[string]v1.Pod) 
 	return result
 }
 
-func getPodsBySelector(ctx context.Context, cl client.Client, selector map[string]string) (map[string]v1.Pod, error) {
+func getPodsBySelector(ctx context.Context, cl client.Client, namespace string, selector map[string]string) (map[string]v1.Pod, error) {
 	podList := &v1.PodList{}
-	err := cl.List(ctx, podList, &client.ListOptions{Namespace: internal.SdsNodeConfiguratorNamespace, LabelSelector: labels.Set(selector).AsSelector()})
+	err := cl.List(ctx, podList, &client.ListOptions{Namespace: namespace, LabelSelector: labels.Set(selector).AsSelector()})
 	if err != nil {
 		return nil, err
 	}

@@ -185,7 +185,7 @@ func RunSdsInfraWatcher(
 
 			log.Info("check if every sds-node-configurator agent's pod is healthy")
 			log.Debug(fmt.Sprintf("tries to get pods by the selector %v", sdsNodeConfiguratorSelector))
-			sdsPods, err := getPodsBySelector(ctx, cl, sdsNodeConfiguratorSelector)
+			sdsPods, err := getPodsBySelector(ctx, cl, cfg.AgentNamespace, sdsNodeConfiguratorSelector)
 			if err != nil {
 				log.Error(fmt.Sprintf("unable to get pods by the seletor %v", sdsNodeConfiguratorSelector), logger.Err(err))
 				continue
