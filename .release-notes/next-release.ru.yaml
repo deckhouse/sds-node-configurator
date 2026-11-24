@@ -5,7 +5,8 @@ summary: ""
 highlights: []
 
 # Необязательные разделы — пустые не оставлять, а удалять.
-# new_features: []
+new_features:
+  - "Новый алерт `D8SdsNodeConfiguratorLVMVolumeGroupNotReady` срабатывает, если условие `Ready` у LVMVolumeGroup не равно `True` дольше 30 минут. В алерте указаны LVMVolumeGroup, её узел, а также условие и причина, из-за которых она не в состоянии `Ready`; в описании для каждой причины сказано, что проверить. Об LVMVolumeGroup, узел которой удалён из кластера (`MissingNode`), по-прежнему сообщает только `D8SdsNodeConfiguratorLVMVolumeGroupNodeMissing`, а удаляемая LVMVolumeGroup алерт не вызывает. Алерт читает новую метрику контроллера `sds_node_configurator_lvm_volume_group_ready` с метками `lvm_volume_group`, `node`, `condition` и `reason`: `1`, пока LVMVolumeGroup в состоянии `Ready`, иначе `0`."
 # improvements: []
 # security: []
 # breaking: []

@@ -5,7 +5,8 @@ summary: ""
 highlights: []
 
 # Optional sections — delete rather than leave empty.
-# new_features: []
+new_features:
+  - "A new alert, `D8SdsNodeConfiguratorLVMVolumeGroupNotReady`, fires when the `Ready` condition of an LVMVolumeGroup has not been `True` for 30 minutes. It names the LVMVolumeGroup, its node, and the condition and reason that keep it from being `Ready`, and its description says what to check for each reason. An LVMVolumeGroup whose node was deleted from the cluster (`MissingNode`) is still reported by `D8SdsNodeConfiguratorLVMVolumeGroupNodeMissing` alone, and an LVMVolumeGroup being deleted is not reported. The alert reads the new controller metric `sds_node_configurator_lvm_volume_group_ready` with the labels `lvm_volume_group`, `node`, `condition` and `reason`: `1` while the LVMVolumeGroup is `Ready`, `0` otherwise."
 # improvements: []
 # security: []
 # breaking: []

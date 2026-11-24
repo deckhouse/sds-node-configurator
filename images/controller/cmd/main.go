@@ -150,6 +150,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	err = controller.RunLVGReadyMetric(mgr, baseLog)
+	if err != nil {
+		log.Error("unable to register the LVMVolumeGroup readiness metric", logger.Err(err))
+		os.Exit(1)
+	}
+
 	err = controller.RunLVGStatusWatcher(mgr, baseLog)
 	if err != nil {
 		log.Error("unable to run LVGConfigurationWatcher controller", logger.Err(err))

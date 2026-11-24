@@ -1,0 +1,38 @@
+- name: kubernetes.sds_node_configurator.lvm_volume_group
+  rules:
+    - alert: D8SdsNodeConfiguratorLVMVolumeGroupNotReady
+      expr: max by (lvm_volume_group, node, condition, reason) (sds_node_configurator_lvm_volume_group_ready{reason!~"MissingNode|Terminating"}) == 0
+      for: 30m
+      labels:
+        severity_level: "5"
+        tier: cluster
+      annotations:
+        plk_markup_format: "markdown"
+        plk_protocol_version: "1"
+        plk_create_group_if_not_exists__d8_sds_node_configurator_lvm_volume_group_health: "D8SdsNodeConfiguratorLVMVolumeGroupHealth,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        plk_grouped_by__d8_sds_node_configurator_lvm_volume_group_health: "D8SdsNodeConfiguratorLVMVolumeGroupHealth,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        summary: LVMVolumeGroup {{ $labels.lvm_volume_group }} on node {{ $labels.node }} is not Ready ({{ $labels.condition }} {{ $labels.reason }})
+        description: |
+          The `Ready` condition of the LVMVolumeGroup `{{ $labels.lvm_volume_group }}` on node `{{ $labels.node }}` has not been `True` for 30 minutes. The condition that keeps it there is `{{ $labels.condition }}` with the reason `{{ $labels.reason }}`.
+
+          While the LVMVolumeGroup is not `Ready`, its phase is not `Ready` either, and the scheduler places no new volumes on it. The volumes already on it keep working unless the node or its disks are what failed.
+
+          Read the condition first, its message names the cause: `d8 k get lvg {{ $labels.lvm_volume_group }} -o jsonpath='{.status.conditions[?(@.type=="{{ $labels.condition }}")]}'`. The agent of the node logs the same. Find its pod with `d8 k -n d8-sds-node-configurator get pods -l app=sds-node-configurator -o wide --field-selector spec.nodeName={{ $labels.node }}`, then read the log: `d8 k -n d8-sds-node-configurator logs <pod> -c sds-node-configurator-agent --tail=500 | grep {{ $labels.lvm_volume_group }}`.
+
+          What to check, by condition and reason:
+
+          - `NodeReady`, `NodeNotReady`: the node is not `Ready`, so its agent reports nothing on the Volume Group and its volumes are out of reach. Bring the node back: `d8 k describe node {{ $labels.node }}`. The alert resolves once the node and its agent are `Ready`.
+          - `AgentReady`, `PodNotReady`: the agent pod on the node is not `Ready`. Find out why from the pod's events and log (commands above): usually it is starting, crash-looping, or stuck on an LVM command. A stuck `lvm` command is what `D8SdsNodeConfiguratorLVMScanAbandoned` reports.
+          - `AgentReady`, `PodNotFound`: no agent pod runs on the node. The agent runs on the nodes that sds-local-volume, sds-replicated-volume or sds-elastic select for their storage, by the labels `storage.deckhouse.io/sds-local-volume-node`, `storage.deckhouse.io/sds-replicated-volume-node` and `storage.deckhouse.io/sds-elastic-node`. Check the node's labels: `d8 k get node {{ $labels.node }} --show-labels`. A node that lost them because a module's `nodeSelector` changed no longer runs the agent: restore the selector, or move the volumes off the node and delete the LVMVolumeGroup. A pod that cannot be scheduled shows the reason in `d8 k -n d8-sds-node-configurator get events`.
+          - `AgentReady`, `NoPod`: no agent pod runs anywhere. Check that `disableDs` is not set in the `sds-node-configurator` ModuleConfig and that the DaemonSet exists: `d8 k -n d8-sds-node-configurator get daemonset sds-node-configurator`.
+          - `VGReady`, `ScanFailed`: the Volume Group on the node is not healthy as LVM sees it, and the message says how: the Volume Group or one of its thin pools is not found, a thin pool is smaller than the status says, two Volume Groups on the node have the same name, or LVM reports a missing Physical Volume or a broken Logical Volume. On the node, run `vgs -o +vg_uuid,vg_missing_pv_count`, `pvs` and `lvs -a` (with `--devicesfile ""` on a node with an LVM devices file, see the FAQ). A disk that went away has to come back (check the disk, the cable, the multipath map or the SAN mapping); the LVMVolumeGroup recovers by itself on the next scan once LVM sees the Volume Group whole. A Volume Group of the same name from another disk has to be renamed with `vgrename <uuid> <new name>`.
+          - `VGReady`, `NodeNotDescribed`: none of the Physical Volumes of the Volume Group has a BlockDevice resource, so the status shows free space as old as the last pass that could describe the node. The device is smaller than the minimum the module accepts or excluded by a BlockDeviceFilter; see the FAQ section "Why does an LVMVolumeGroup report `BlockDeviceNotFound` or `NodeNotDescribed`?".
+          - `VGReady`, `NoBlockDevices` or `DataConfigurationFailed`; `VGConfigurationApplied`, `NoBlockDevices`: the agent could not read the BlockDevice resources or build the Volume Group's status from what it read. These are usually API server errors; the agent's log has the error, and the condition clears on its own once the API server answers.
+          - `VGConfigurationApplied`, `VGCheckFailed`: the agent cannot read the Volume Groups of the node at all, and does nothing with this Volume Group until it can. The causes do not go away by themselves: the LVM binary missing from `/var/lib/deckhouse/sds/bin` on the node, `nsenter` failing, `/etc/lvm` unreadable. The agent's log has the command and its error.
+          - `VGConfigurationApplied`, `VGNameTakenOnNode`: `vgcreate` refuses because `/dev/<vg>` is left on the node from a Volume Group removed by hand. See the FAQ section "Why is an LVMVolumeGroup not created with `/dev/<vg>: already exists in filesystem`?".
+          - `VGConfigurationApplied`, `VGCreationFailed`, `VGExtendFailed`, `PVResizeFailed` or `VGUpdateFailed`: an LVM command applying the spec failed, and the message carries its output. Check the BlockDevices that `spec.blockDeviceSelector` selects (`d8 k get bd -o wide`): each must be on node `{{ $labels.node }}`, and a device not yet in the Volume Group must be `consumable`. Then check the devices themselves on the node. The agent retries on its own once the cause is fixed.
+          - `VGConfigurationApplied`, `VGNotFound`: the Volume Group the LVMVolumeGroup names (`spec.actualVGNameOnTheNode`) is not on the node. Handle it as `ScanFailed` above.
+          - `Ready`, `Pending`: 30 minutes on, some of the conditions above have still not been reported, or the agent still reports the Volume Group as `Creating`, and no other condition says why. A new LVMVolumeGroup normally passes this within minutes. Check that the agent on the node is running and that the LVMVolumeGroup lists the node in `status.nodes`; the controller's log has the rest: `d8 k -n d8-sds-node-configurator logs deploy/controller -c controller --tail=500 | grep {{ $labels.lvm_volume_group }}`.
+          - Any other reason: the message of the condition describes it.
+
+          The reasons that leave the Volume Group serving (file devices or thin pools that could not be applied, a spec that did not pass validation, a cache that has not caught up) do not take `Ready` down and do not fire this alert. A node deleted from the cluster (`MissingNode`) is reported by `D8SdsNodeConfiguratorLVMVolumeGroupNodeMissing` instead, and an LVMVolumeGroup being deleted (`Terminating`) is not reported.
