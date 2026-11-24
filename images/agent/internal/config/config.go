@@ -34,6 +34,7 @@ import (
 const (
 	ScanInterval                         = "SCAN_INTERVAL"
 	NodeName                             = "NODE_NAME"
+	ClusterUUID                          = "CLUSTER_UUID"
 	MachineID                            = "MACHINE_ID"
 	ThrottleInterval                     = "THROTTLER_INTERVAL"
 	CmdDeadlineDuration                  = "CMD_DEADLINE_DURATION"
@@ -91,6 +92,7 @@ type Features struct {
 type Config struct {
 	MachineID               string
 	NodeName                string
+	ClusterUUID             string
 	Loglevel                logger.Verbosity
 	MetricsBindAddress      string
 	BlockDeviceScanInterval time.Duration
@@ -127,6 +129,7 @@ func NewConfig() (*Config, error) {
 	var cfg Config
 
 	cfg.NodeName = os.Getenv(NodeName)
+	cfg.ClusterUUID = os.Getenv(ClusterUUID)
 	if cfg.NodeName == "" {
 		return nil, fmt.Errorf("[NewConfig] required %s env variable is not specified", NodeName)
 	}

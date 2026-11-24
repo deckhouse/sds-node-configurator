@@ -76,7 +76,7 @@ type Commands interface {
 	PVScan(ctx context.Context) (string, error)
 	UdevadmTrigger(ctx context.Context, paths []string) (string, error)
 	UnmarshalDevices(out []byte) ([]internal.Device, error)
-	ReTag(ctx context.Context, log logger.Logger, metrics *monitoring.Metrics, ctrlName string, cmdTimeout time.Duration) error
+	ReTag(ctx context.Context, log logger.Logger, metrics *monitoring.Metrics, ctrlName string, owners VGOwnershipSource, cmdTimeout time.Duration) error
 
 	CreateFileDevice(ctx context.Context, path string, sizeBytes int64) (string, error)
 	GetFileAllocatedBytes(ctx context.Context, path string) (string, int64, error)
@@ -955,14 +955,14 @@ func (commands) UnmarshalDevices(out []byte) ([]internal.Device, error) {
 // file-backed disk carries too; until spec.fileDevices removed `loop` from
 // LVMGlobalFilter such a Volume Group was invisible to lvm.static and the
 // question never arose. See utils/loopvg.go.
-func (c *commands) ReTag(ctx context.Context, log logger.Logger, metrics *monitoring.Metrics, ctrlName string, cmdTimeout time.Duration) error {
-	return reTag(ctx, c, log, metrics, ctrlName, cmdTimeout)
+func (c *commands) ReTag(ctx context.Context, log logger.Logger, metrics *monitoring.Metrics, ctrlName string, owners VGOwnershipSource, cmdTimeout time.Duration) error {
+	return reTag(ctx, c, log, metrics, ctrlName, owners, cmdTimeout)
 }
 
 // reTag is ReTag's body, taking the command set as a parameter so the ownership
 // gate below can be tested. The method reads through the same interface it
 // implements, which is otherwise impossible to stand in for.
-func reTag(ctx context.Context, c Commands, log logger.Logger, metrics *monitoring.Metrics, ctrlName string, cmdTimeout time.Duration) error {
+func reTag(ctx context.Context, c Commands, log logger.Logger, metrics *monitoring.Metrics, ctrlName string, owners VGOwnershipSource, cmdTimeout time.Duration) error {
 	log.Debug("start establishing which VGs are the module's own")
 	start := time.Now()
 	type vgsResult struct {
@@ -1005,15 +1005,7 @@ func reTag(ctx context.Context, c Commands, log logger.Logger, metrics *monitori
 	}
 
 	verdicts := ClassifyLoopVGs(ctx, log, c, cmdTimeout, vgsRes.data, pvs)
-	ownVGs := SkipUnownedLoopVGs(log, "re-tag", vgsRes.data, verdicts)
-	// An LV names its Volume Group but not its UUID, so LVs are matched by name.
-	// A name shared by an owned and a foreign Volume Group therefore skips both,
-	// which is the harmless direction: the legacy tag simply stays until the
-	// duplicate is resolved.
-	ownVGNames := make(map[string]struct{}, len(ownVGs))
-	for _, vg := range ownVGs {
-		ownVGNames[vg.VGName] = struct{}{}
-	}
+	loopOwnedVGs := SkipUnownedLoopVGs(log, "re-tag", vgsRes.data, verdicts)
 
 	// thin pool
 	log.Debug("start re-tagging LV")
@@ -1034,6 +1026,18 @@ func reTag(ctx context.Context, c Commands, log logger.Logger, metrics *monitori
 		log.Error("unable to GetAllLVs", logger.Err(err))
 		return err
 	}
+
+	if !hasLegacyTag(loopOwnedVGs, lvsRes.data) {
+		log.Debug("no VG or LV carries the legacy tag, nothing to re-tag")
+		return nil
+	}
+
+	// An LV names its Volume Group but not its UUID, so LVs are matched by name.
+	// A name shared by an owned and a foreign Volume Group therefore skips both,
+	// which is the harmless direction: the legacy tag simply stays until the
+	// duplicate is resolved.
+	ownVGs, ownVGNames := ownVGsByUniqueName(vgsRes.data,
+		FilterOwnedVGs(log, "re-tag", loopOwnedVGs, ownership(ctx, owners), func(msg string) { log.Info(msg) }))
 
 	for _, lv := range lvsRes.data {
 		if _, own := ownVGNames[lv.VGName]; !own {

@@ -34,7 +34,7 @@ func ensureVGActivation(t *testing.T, mc *mock_utils.MockCommands, lvs []interna
 	t.Helper()
 	vgs := []internal.VGData{{VGName: "vg-thin", VGUUID: "uuid-thin", VGTags: managedTag}}
 	return utils.EnsureVGActivation(context.Background(), testLogger(t), mc,
-		monitoring.GetMetrics("test_node"), vgs, lvs, nil, 30*time.Second)
+		monitoring.GetMetrics("test_node"), vgs, lvs, nil, ownerOf("vg-thin"), 30*time.Second)
 }
 
 // An inactive thin LV reads as empty, and its pool being up does not bring it

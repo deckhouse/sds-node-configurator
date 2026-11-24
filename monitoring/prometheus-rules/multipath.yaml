@@ -24,12 +24,16 @@
 
           Such a map is left behind when a SAN volume is unmapped on the array, or its iSCSI/FC session is lost, while the map still exists on the node — after a forced detach, a node failure, or a driver that did not finish its cleanup.
 
+          On a node that hosts virtual machines, a map is also kept by the Logical Volumes of a nested cluster: the virtual machine's disk carried a Volume Group, the node activated it, and its Logical Volumes still hold the map after the virtual machine was deleted or moved to another node. Earlier versions of the module activated such Volume Groups when the nested cluster ran sds-node-configurator too.
+
           The recommended course of action, on the node:
           1. Find the maps: `multipath -ll` (every path `failed`, or no path at all, vendor shown as `##,##`), or `dmsetup status --target multipath` (no path reported as `A`). The agent names them in its log: `d8 k -n d8-sds-node-configurator logs -l app=sds-node-configurator --tail=500 | grep "multipath maps with no usable path"`.
-          2. Make sure the volume behind each map is really gone: it is not mapped to this node on the array, and no PersistentVolume of this node expects it.
-          3. Stop the queueing, so that whoever is blocked on the map gets an error and lets go: `dmsetup message <map> 0 fail_if_no_path`.
-          4. Remove the map and its dead paths: `multipath -f <map>`, then `echo 1 > /sys/block/<path device>/device/delete` for each path it listed. If `multipath -f` answers `map in use`, find the holder with `fuser -vm /dev/mapper/<map>` and `ls -l /proc/<pid>/fd | grep dm-`; after step 3 it exits on its own.
-          5. If the maps come back, the CSI driver that owns the volumes is not cleaning up after itself; report it with the output of step 1.
+          2. Check what holds each map: `ls /sys/block/dm-N/holders`, where `dm-N` is the map's device (`readlink -f /dev/mapper/<map>`). For every holder, `cat /sys/block/<holder>/dm/name /sys/block/<holder>/dm/uuid`: a uuid starting with `LVM-` is a Logical Volume, and its name is `<vg>-<lv>` with every `-` inside a name doubled. Compare the Volume Group with `d8 k get lvmvolumegroups -o custom-columns=NAME:.metadata.name,NODE:.spec.local.nodeName,VG:.spec.actualVGNameOnTheNode`: a Volume Group that no LVMVolumeGroup of this node names belongs to a nested cluster and must not be active on this node.
+          3. Make sure the volume behind each map is really gone: it is not mapped to this node on the array, and no PersistentVolume of this node expects it.
+          4. Stop the queueing, so that whoever is blocked on the map gets an error and lets go: `dmsetup message <map> 0 fail_if_no_path`.
+          5. Remove the nested cluster's Logical Volumes found in step 2 without reading the map: `dmsetup remove <holder>` for each of them, from the top of the stack down (thin volumes first, then `-tpool`, then `_tdata` and `_tmeta`; `ls /sys/block/<holder>/holders` must be empty before a device is removed). Do not use `vgchange -an` on such a Volume Group: it scans the node's devices, including the dead map.
+          6. Remove the map and its dead paths: `multipath -f <map>`, then `echo 1 > /sys/block/<path device>/device/delete` for each path it listed. If `multipath -f` answers `map in use`, find the holder with `fuser -vm /dev/mapper/<map>` and `ls -l /proc/<pid>/fd | grep dm-`; after step 4 it exits on its own.
+          7. If the maps come back, the CSI driver that owns the volumes is not cleaning up after itself; report it with the output of step 1.
 
     - alert: D8SdsNodeConfiguratorLVMScanAbandoned
       expr: max by (node, command) (sds_node_configurator_lvm_scans_outstanding) > 0

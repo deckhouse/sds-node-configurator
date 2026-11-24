@@ -31,7 +31,11 @@ import (
 const (
 	autoactivationTemplate = "../templates/agent/nodegroupconfiguration-host-lvm-autoactivation.yaml"
 	autoactivationEntry    = "host_lvm_configure_autoactivation"
-	moduleTag              = "@storage.deckhouse.io/enabled=true"
+	clusterUUIDValue       = `{{ ((.Values.global).discovery).clusterUUID | default "" | squote }}`
+	testClusterUUID        = "0b9c6d3e-4a59-4f6e-9a39-2a1f5ad1c0de"
+	moduleTag              = "@storage.deckhouse.io/cluster=" + testClusterUUID
+	legacyTag              = "@storage.deckhouse.io/enabled=true"
+	otherClusterTag        = "@storage.deckhouse.io/cluster=11111111-2222-3333-4444-555555555555"
 )
 
 const lvmconfigStub = `#!/bin/bash
@@ -97,6 +101,18 @@ func ngcScript(t *testing.T, path, entry string) string {
 	return strings.Join(body[:len(body)-1], "\n") + "\n"
 }
 
+func renderClusterUUID(t *testing.T, script, clusterUUID string) string {
+	t.Helper()
+	if strings.Count(script, clusterUUIDValue) != 1 {
+		t.Fatalf("the script must take the cluster UUID from %s exactly once", clusterUUIDValue)
+	}
+	script = strings.Replace(script, clusterUUIDValue, "'"+strings.ReplaceAll(clusterUUID, "'", `'\''`)+"'", 1)
+	if strings.Contains(script, "{{") {
+		t.Fatal("the script has a template expression the test does not render")
+	}
+	return script
+}
+
 type fakeNode struct {
 	t       *testing.T
 	root    string
@@ -109,11 +125,12 @@ type fakeNode struct {
 	findfs  map[string]string
 	nextID  int
 	realLVM bool
+	cluster string
 }
 
 func newFakeNode(t *testing.T) *fakeNode {
 	t.Helper()
-	n := &fakeNode{t: t, root: t.TempDir(), findfs: map[string]string{}, cmdline: "BOOT_IMAGE=/vmlinuz ro quiet", nextID: 20}
+	n := &fakeNode{t: t, root: t.TempDir(), findfs: map[string]string{}, cmdline: "BOOT_IMAGE=/vmlinuz ro quiet", nextID: 20, cluster: testClusterUUID}
 	n.stubs = filepath.Join(n.root, "stubs")
 	for _, dir := range []string{"proc/self", "sys/dev/block", "sys/class/block", "dev/mapper", "etc/lvm", "stubs"} {
 		n.mkdir(dir)
@@ -238,7 +255,7 @@ func (n *fakeNode) run() runResult {
 	n.t.Helper()
 	n.flush()
 	lib := filepath.Join(n.root, "ngc.sh")
-	if err := os.WriteFile(lib, []byte(ngcScript(n.t, autoactivationTemplate, autoactivationEntry)), 0o644); err != nil {
+	if err := os.WriteFile(lib, []byte(renderClusterUUID(n.t, ngcScript(n.t, autoactivationTemplate, autoactivationEntry), n.cluster)), 0o644); err != nil {
 		n.t.Fatal(err)
 	}
 	stubDir := n.stubs
@@ -322,7 +339,7 @@ func (n *fakeNode) rootOnPartition() {
 }
 
 func TestVGOfDMName(t *testing.T) {
-	lib := ngcScript(t, autoactivationTemplate, autoactivationEntry)
+	lib := renderClusterUUID(t, ngcScript(t, autoactivationTemplate, autoactivationEntry), testClusterUUID)
 	for _, tc := range []struct {
 		name, want string
 		ok         bool
@@ -531,7 +548,7 @@ func TestAnAdministratorsListIsExtendedNotReplaced(t *testing.T) {
 	n.setList(`["manual","vg2/lvol1","@site"]`)
 	r := n.run()
 	n.expectList(r, "manual", "vg2/lvol1", "@site", "rootvg", moduleTag)
-	if !strings.Contains(r.stderr, "extended") {
+	if !strings.Contains(r.stderr, "changed") {
 		t.Fatalf("the change of an existing list is not reported:\n%s", r.stderr)
 	}
 }
@@ -555,13 +572,59 @@ func TestACompleteListIsNotRewritten(t *testing.T) {
 	n.disk("sda", "8:0")
 	n.lv("dm-0", "253:0", "rootvg", "root", "sda")
 	n.mount("253:0", "/", "ext4", "/dev/mapper/rootvg-root")
-	n.setList(`["@storage.deckhouse.io/enabled=true","manual","rootvg"]`)
+	n.setList(`["` + moduleTag + `","manual","rootvg"]`)
 	r := n.run()
 	if r.err != nil {
 		t.Fatalf("the script failed: %v\n%s", r.err, r.stderr)
 	}
 	if n.writes() != 0 {
 		t.Fatalf("lvm.conf was rewritten although the list already has every entry\n%s", r.stderr)
+	}
+}
+
+func TestTheUnboundModuleTagIsDropped(t *testing.T) {
+	n := newFakeNode(t)
+	n.disk("sda", "8:0")
+	n.lv("dm-0", "253:0", "rootvg", "root", "sda")
+	n.mount("253:0", "/", "ext4", "/dev/mapper/rootvg-root")
+	n.setList(`["manual","rootvg","` + legacyTag + `"]`)
+	n.expectList(n.run(), "manual", "rootvg", moduleTag)
+}
+
+func TestAnotherClustersTagIsReplaced(t *testing.T) {
+	n := newFakeNode(t)
+	n.rootOnPartition()
+	n.setList(`["` + otherClusterTag + `","manual"]`)
+	n.expectList(n.run(), "manual", moduleTag)
+}
+
+func TestWithoutAClusterUUIDTheListHasNoTag(t *testing.T) {
+	for _, uuid := range []string{"", "not a tag", "a,b"} {
+		t.Run(fmt.Sprintf("%q", uuid), func(t *testing.T) {
+			n := newFakeNode(t)
+			n.cluster = uuid
+			n.disk("sda", "8:0")
+			n.lv("dm-0", "253:0", "rootvg", "root", "sda")
+			n.mount("253:0", "/", "ext4", "/dev/mapper/rootvg-root")
+			n.setList(`["` + legacyTag + `"]`)
+			n.expectList(n.run(), "rootvg")
+		})
+	}
+}
+
+func TestANodeWithNothingToAutoactivateGetsAnEmptyList(t *testing.T) {
+	n := newFakeNode(t)
+	n.cluster = ""
+	n.rootOnPartition()
+	n.setList(`["` + legacyTag + `"]`)
+	r := n.run()
+	n.expectList(r)
+	raw, err := os.ReadFile(n.path("stubs/list"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(string(raw)); got != "auto_activation_volume_list=[]" {
+		t.Fatalf("the list is written as %s, want an empty list", got)
 	}
 }
 
@@ -643,7 +706,7 @@ func TestWithTheRealLvmconfig(t *testing.T) {
 	if r.err != nil {
 		t.Fatalf("the script failed: %v\n%s", r.err, r.stderr)
 	}
-	if got, want := lvmconfig("activation/auto_activation_volume_list"), `auto_activation_volume_list=["ubuntu-vg","@storage.deckhouse.io/enabled=true"]`; got != want {
+	if got, want := lvmconfig("activation/auto_activation_volume_list"), `auto_activation_volume_list=["ubuntu-vg","`+moduleTag+`"]`; got != want {
 		t.Fatalf("lvm reads %s, want %s", got, want)
 	}
 	if got, want := lvmconfig("devices/global_filter"), `global_filter="r|^/dev/loop[0-9]+|"`; got != want {

@@ -153,6 +153,8 @@ func run() int {
 
 	metrics := monitoring.GetMetrics(cfgParams.NodeName)
 	commands := utils.NewCommands()
+	clusterTag := utils.ClusterTag(cfgParams.ClusterUUID)
+	vgOwners := utils.NewVGOwnershipSource(log, cfgParams.NodeName, clusterTag, cfgParams.CmdDeadlineDuration, mgr.GetClient(), mgr.GetAPIReader())
 
 	// Run ReTag and VG activation only after the manager has started its
 	// HTTP servers (including health probes). These nsenter-backed LVM
@@ -172,7 +174,7 @@ func run() int {
 		}
 
 		log.Info("ReTag starts")
-		if err := commands.ReTag(ctx, log, metrics, bd.DiscovererName, cfgParams.CmdDeadlineDuration); err != nil {
+		if err := commands.ReTag(ctx, log, metrics, bd.DiscovererName, vgOwners, cfgParams.CmdDeadlineDuration); err != nil {
 			log.Error("unable to run ReTag", logger.Err(err))
 		}
 
@@ -191,7 +193,7 @@ func run() int {
 		}
 
 		log.Info("ActivateVGs starts")
-		if err := utils.ActivateAllManagedVGs(ctx, log, commands, metrics, cfgParams.CmdDeadlineDuration); err != nil {
+		if err := utils.ActivateAllManagedVGs(ctx, log, commands, metrics, vgOwners, cfgParams.CmdDeadlineDuration); err != nil {
 			log.Error("unable to activate managed VGs", logger.Err(err))
 		}
 		log.Info("ActivateVGs completed")
@@ -313,6 +315,7 @@ func run() int {
 
 				FileDevicesMinFreeSpacePercent: cfgParams.FileDevicesMinFreeSpacePercent,
 				ThinPools:                      thinPoolCfgs.llv.ThinPools,
+				ClusterTag:                     clusterTag,
 			},
 		),
 	)
@@ -322,7 +325,7 @@ func run() int {
 	}
 
 	go func() {
-		if err = scanner.NewScanner(commands).Run(
+		if err = scanner.NewScanner(commands, vgOwners).Run(
 			ctx,
 			log,
 			*cfgParams,

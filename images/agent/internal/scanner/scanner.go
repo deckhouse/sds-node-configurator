@@ -65,10 +65,11 @@ type scanner struct {
 	// hostMountInfo is the mountinfo both discovery paths take mount points
 	// from: utils.ProcHostMountInfo, a fake one in tests.
 	hostMountInfo string
+	owners        utils.VGOwnershipSource
 }
 
-func NewScanner(commands utils.Commands) Scanner {
-	return &scanner{commands: commands, hostMountInfo: utils.ProcHostMountInfo}
+func NewScanner(commands utils.Commands, owners utils.VGOwnershipSource) Scanner {
+	return &scanner{commands: commands, hostMountInfo: utils.ProcHostMountInfo, owners: owners}
 }
 
 func (s *scanner) Run(
@@ -409,7 +410,7 @@ func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *ca
 	// host, once per udev burst, because it carries the managed tag.
 	loopVerdicts := utils.ClassifyLoopVGs(ctx, log, s.commands, cfg.CmdDeadlineDuration, vgs, pvs)
 
-	if activated := utils.EnsureVGActivation(ctx, log, s.commands, metrics, vgs, lvs, loopVerdicts, cfg.CmdDeadlineDuration); activated {
+	if activated := utils.EnsureVGActivation(ctx, log, s.commands, metrics, vgs, lvs, loopVerdicts, s.owners, cfg.CmdDeadlineDuration); activated {
 		log.Info("LVs were activated, re-scanning LVs and VGs")
 		now = time.Now()
 		lvs, lvsErr, err = s.scanLVs(ctx, log, cfg)

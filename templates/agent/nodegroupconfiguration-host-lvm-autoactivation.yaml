@@ -22,7 +22,13 @@ spec:
     # See the License for the specific language governing permissions and
     # limitations under the License.
 
-    host_lvm_module_tag='@storage.deckhouse.io/enabled=true'
+    host_lvm_cluster_uuid={{ ((.Values.global).discovery).clusterUUID | default "" | squote }}
+    host_lvm_legacy_tag='@storage.deckhouse.io/enabled=true'
+    host_lvm_cluster_tag_prefix='@storage.deckhouse.io/cluster='
+    host_lvm_module_tag=
+    if [[ $host_lvm_cluster_uuid =~ ^[A-Za-z0-9_+.-]+$ ]]; then
+      host_lvm_module_tag="${host_lvm_cluster_tag_prefix}${host_lvm_cluster_uuid}"
+    fi
     host_lvm_conf_dir=${LVM_SYSTEM_DIR:-/etc/lvm}
     host_lvm_proc=/proc
     host_lvm_sys=/sys
@@ -114,7 +120,7 @@ spec:
       if [ -z "$dev" ]; then
         case $spec in
           UUID=*|LABEL=*|PARTUUID=*|PARTLABEL=*)
-            host_lvm_say "cannot find the device ${spec} named in ${origin}; if it is on LVM, tag its Volume Group with ${host_lvm_module_tag#@} or add the Volume Group to activation/auto_activation_volume_list"
+            host_lvm_say "cannot find the device ${spec} named in ${origin}; if it is on LVM, add its Volume Group to activation/auto_activation_volume_list"
             ;;
         esac
         return 0
@@ -279,9 +285,12 @@ spec:
 
       if current=$(lvmconfig activation/auto_activation_volume_list 2>/dev/null); then
         while IFS= read -r entry; do
-          if [ -n "$entry" ]; then
-            entries+=("$entry")
-          fi
+          case $entry in
+            '') ;;
+            "$host_lvm_module_tag") entries+=("$entry") ;;
+            "$host_lvm_legacy_tag"|"$host_lvm_cluster_tag_prefix"*) changed=1 ;;
+            *) entries+=("$entry") ;;
+          esac
         done < <(host_lvm_list_entries "$current")
       else
         current=
@@ -305,17 +314,20 @@ spec:
           entries+=("$vg")
           changed=1
         fi
-      done < <(sort -u "$vgs_file"; echo "$host_lvm_module_tag")
+      done < <(sort -u "$vgs_file"; if [ -n "$host_lvm_module_tag" ]; then echo "$host_lvm_module_tag"; fi)
       rm -f "$vgs_file"
 
       [ -n "$changed" ] || return 0
 
-      new=$(printf '"%s",' "${entries[@]}")
+      new=
+      if [ "${#entries[@]}" -gt 0 ]; then
+        new=$(printf '"%s",' "${entries[@]}")
+      fi
       new="[${new%,}]"
       lvmconfig --config "activation/auto_activation_volume_list=$new" --withcomments --merge > "$host_lvm_conf_dir/lvm.conf.$$"
       mv "$host_lvm_conf_dir/lvm.conf.$$" "$host_lvm_conf_dir/lvm.conf"
       if [ -n "$current" ]; then
-        host_lvm_say "extended ${current} to ${new}"
+        host_lvm_say "changed ${current} to ${new}"
       else
         host_lvm_say "set activation/auto_activation_volume_list to ${new}"
       fi

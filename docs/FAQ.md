@@ -867,10 +867,14 @@ The node's own LVM activates Logical Volumes by itself in two cases: when the de
 
 The module limits autoactivation with the `activation/auto_activation_volume_list` setting in `/etc/lvm/lvm.conf` of every node that has the distribution's lvm2 installed. The setting is written by the module's NodeGroupConfiguration `sds-node-configurator-host-lvm-autoactivation.sh` each time bashible applies it, and the list holds:
 
-- `@storage.deckhouse.io/enabled=true`: every Volume Group with the module's tag, that is, every Volume Group of an [LVMVolumeGroup](./cr.html#lvmvolumegroup). The agent activates these Volume Groups itself as well.
+- `@storage.deckhouse.io/cluster=<cluster UUID>`: the Volume Groups of this cluster's [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources. The agent puts this tag on the Volume Group of every LVMVolumeGroup of its node; the UUID is the `cluster-uuid` key of the `kube-system/d8-cluster-uuid` ConfigMap.
 - The Volume Groups the node boots from: those under the root file system, under every other mounted file system except the ones kubelet mounts under `/var/lib/kubelet`, under active swap, under the entries of `/etc/fstab`, under the `root=`, `resume=`, `rd.lvm.vg=` and `rd.lvm.lv=` kernel parameters and under `RESUME` in `/etc/initramfs-tools/conf.d/resume`.
 
 A Volume Group that is in neither is no longer autoactivated. Activation by an explicit command (`vgchange -ay`, `lvchange -ay`) is not affected.
+
+The module's own tag, `storage.deckhouse.io/enabled=true`, is not in the list: a nested cluster that runs sds-node-configurator puts the same tag on its Volume Groups, so the tag does not tell the node's Volume Groups from a guest's.
+
+The agent activates Volume Groups by itself too, at its start and whenever it finds an inactive Logical Volume. It activates only the Volume Groups that an LVMVolumeGroup of its node names: `spec.local.nodeName` is the node, `spec.actualVGNameOnTheNode` is the name of the Volume Group, and, once the resource reports it, `status.vgUUID` is its UUID. A Volume Group with the module's tag but without such a resource — a nested cluster's Volume Group on a virtual machine's disk, a LUN visible both to the node and to a guest — is not activated, and the agent says so in its log (`not going to activate VG`). Neither is a Volume Group tagged `storage.deckhouse.io/cluster=` with another cluster's UUID, even if an LVMVolumeGroup of this cluster names it. While the agent cannot read LVMVolumeGroup resources from the API server, it activates only the Volume Groups with this cluster's tag, the same ones the node autoactivates.
 
 To see the list on a node:
 
@@ -880,7 +884,7 @@ lvmconfig activation/auto_activation_volume_list
 
 How the list is kept:
 
-- The module only adds entries. Entries already in the list stay, including those of a list the administrator set before; the module never removes a Volume Group from it.
+- The module adds entries and removes only the tags it wrote itself: `@storage.deckhouse.io/enabled=true`, written by earlier versions, and `@storage.deckhouse.io/cluster=` with a UUID other than this cluster's. Other entries stay, including those of a list the administrator set before; the module never removes a Volume Group from it.
 - When the module cannot tell which device the root file system is on, it does not change `lvm.conf` and writes the reason to the bashible log of the node (`journalctl -u bashible`, lines starting with `lvm autoactivation:`).
 - The initramfs gets a copy of `lvm.conf` the next time it is regenerated, for example when the kernel is updated; the module does not regenerate it. On Debian, Ubuntu and Astra Linux (initramfs-tools) the initramfs activates the root Logical Volume with `-aay`, which reads the list, and the Volume Group of the root is always in it. The initramfs of RHEL, Rocky Linux and RED OS (dracut) and of ALT Linux (make-initrd) activates the root with `-ay`, to which the list does not apply.
 - A Volume Group is matched by name. A guest Volume Group with the same name as one in the list (for example, that of a guest installed from the same image as the node) matches the list just as the node's own does.
@@ -891,8 +895,16 @@ A Volume Group created on the node outside the module, whose Logical Volumes are
 
 Do one of the following before rebooting the node:
 
-- Add the Volume Group to the list. Edit `/etc/lvm/lvm.conf` and add the name to `auto_activation_volume_list` in the `activation` section, for example `auto_activation_volume_list=["vg-system","@storage.deckhouse.io/enabled=true","myvg"]`. The module keeps the entry.
-- Hand the Volume Group over to the module with the tag `storage.deckhouse.io/enabled=true` (see ["How do I transfer control of an existing LVM Volume Group to the controller?"](#how-do-i-transfer-control-of-an-existing-lvm-volume-group-to-the-controller)). The tag puts the Volume Group into the list, but the module also creates an [LVMVolumeGroup](./cr.html#lvmvolumegroup) for it, so use it only for a Volume Group the module is meant to manage.
+- Add the Volume Group to the list. Edit `/etc/lvm/lvm.conf` and add the name to `auto_activation_volume_list` in the `activation` section, for example `auto_activation_volume_list=["vg-system","@storage.deckhouse.io/cluster=<cluster UUID>","myvg"]`. The module keeps the entry.
+- Hand the Volume Group over to the module with the tag `storage.deckhouse.io/enabled=true` (see ["How do I transfer control of an existing LVM Volume Group to the controller?"](#how-do-i-transfer-control-of-an-existing-lvm-volume-group-to-the-controller)). The module creates an [LVMVolumeGroup](./cr.html#lvmvolumegroup) for it, and the agent then adds this cluster's tag, which puts the Volume Group into the list; use it only for a Volume Group the module is meant to manage.
+
+### A Volume Group of this cluster carries another cluster's tag
+
+The agent neither activates nor retags a Volume Group tagged `storage.deckhouse.io/cluster=` with a UUID other than this cluster's, and logs `belongs to another cluster` for its LVMVolumeGroup. That happens when the cluster was installed anew over nodes whose disks were kept. If the Volume Group is really this cluster's, remove the old tag on the node, and the agent adds the current one:
+
+```shell
+vgchange --deltag storage.deckhouse.io/cluster=<old cluster UUID> <vg>
+```
 
 To bring up such a Volume Group now: `vgchange -ay <vg>`.
 
@@ -939,4 +951,4 @@ What remains after the module is disabled:
 - BlockDevice resources. They are not deleted on disabling. While the module runs, a BlockDevice is deleted only after its device disappears from the node, or after its node is deleted or stops running the agent (see `missingBlockDeviceRetentionHours`); one deleted by hand for a device that is still there is created again.
 - Volume Groups whose LVMVolumeGroup was not deleted before disabling. They keep working as plain LVM Volume Groups. If their LVMVolumeGroup resources are deleted while the module is disabled, the Volume Groups the module created are not imported again after the module is re-enabled, see [Why is a Volume Group with the module's tags not imported, and how do I adopt it?](#why-is-a-volume-group-with-the-modules-tags-not-imported-and-how-do-i-adopt-it).
 - Volume Groups on file-backed devices are not activated after a node reboot: the agent that attached the loop devices is gone.
-- The module's files under `/var/lib/deckhouse/sds`, and the loop device filter and the `activation/auto_activation_volume_list` setting in `/etc/lvm/lvm.conf` on the nodes. The list keeps limiting autoactivation to the Volume Groups in it and to those with the module's tag; remove the setting from `lvm.conf` to have the node autoactivate every Volume Group again (see ["Which Volume Groups does the node activate on its own?"](#which-volume-groups-does-the-node-activate-on-its-own)).
+- The module's files under `/var/lib/deckhouse/sds`, and the loop device filter and the `activation/auto_activation_volume_list` setting in `/etc/lvm/lvm.conf` on the nodes. The list keeps limiting autoactivation to the Volume Groups in it and to those with this cluster's tag; remove the setting from `lvm.conf` to have the node autoactivate every Volume Group again (see ["Which Volume Groups does the node activate on its own?"](#which-volume-groups-does-the-node-activate-on-its-own)).

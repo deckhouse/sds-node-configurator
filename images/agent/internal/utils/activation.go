@@ -209,7 +209,7 @@ type FileDeviceStatus struct {
 	LoopDevice string
 }
 
-func ActivateAllManagedVGs(ctx context.Context, log logger.Logger, commands Commands, metrics *monitoring.Metrics, cmdTimeout time.Duration) error {
+func ActivateAllManagedVGs(ctx context.Context, log logger.Logger, commands Commands, metrics *monitoring.Metrics, owners VGOwnershipSource, cmdTimeout time.Duration) error {
 	log.Info("refreshing LVM metadata cache")
 	if cmd, err := RunWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (string, error) {
 		return commands.PVScan(ctx)
@@ -269,6 +269,12 @@ func ActivateAllManagedVGs(ctx context.Context, log logger.Logger, commands Comm
 		return nil
 	}
 
+	managedVGs = FilterOwnedVGs(log, "activate", managedVGs, ownership(ctx, owners), func(msg string) { log.Info(msg) })
+	if len(managedVGs) == 0 {
+		log.Info("no VGs of this node found, nothing to activate")
+		return nil
+	}
+
 	log.Info(fmt.Sprintf("found %d managed VGs to activate", len(managedVGs)))
 
 	var activationErrors []error
@@ -295,8 +301,8 @@ func ActivateAllManagedVGs(ctx context.Context, log logger.Logger, commands Comm
 	return nil
 }
 
-// EnsureVGActivation activates the managed Volume Groups that have inactive
-// thick, thin-pool or thin logical volumes.
+// EnsureVGActivation activates the managed Volume Groups owners attributes to
+// this node that have inactive thick, thin-pool or thin logical volumes.
 //
 // A thin LV can be inactive while its pool is up (`lvchange -an` on the LV
 // alone), and an inactive thin LV reads as empty, so it has to trigger the
@@ -321,6 +327,7 @@ func EnsureVGActivation(
 	vgs []internal.VGData,
 	lvs []internal.LVData,
 	verdicts LoopVGVerdicts,
+	owners VGOwnershipSource,
 	cmdTimeout time.Duration,
 ) bool {
 	managedVGs := SkipUnownedLoopVGs(log, "activate", FilterVGsByTag(vgs, internal.LVMTags), verdicts)
@@ -328,15 +335,14 @@ func EnsureVGActivation(
 		return false
 	}
 
-	managedVGSet := make(map[string]internal.VGData, len(managedVGs))
+	managedVGSet := make(map[string][]internal.VGData, len(managedVGs))
 	for _, vg := range managedVGs {
-		managedVGSet[vg.VGName] = vg
+		managedVGSet[vg.VGName] = append(managedVGSet[vg.VGName], vg)
 	}
 
-	vgsToActivate := make(map[string]internal.VGData)
+	inactiveLVs := make(map[string][]internal.LVData)
 	for _, lv := range lvs {
-		vg, managed := managedVGSet[lv.VGName]
-		if !managed {
+		if _, managed := managedVGSet[lv.VGName]; !managed {
 			continue
 		}
 
@@ -349,9 +355,25 @@ func EnsureVGActivation(
 		}
 
 		if !IsLVActive(lv.LVAttr) {
-			log.Warn(fmt.Sprintf("detected inactive LV %s/%s (attr=%s)", lv.VGName, lv.LVName, lv.LVAttr))
-			vgsToActivate[vg.VGName] = vg
+			inactiveLVs[lv.VGName] = append(inactiveLVs[lv.VGName], lv)
 		}
+	}
+
+	if len(inactiveLVs) == 0 {
+		return false
+	}
+
+	o := ownership(ctx, owners)
+	vgsToActivate := make(map[string]internal.VGData)
+	for name, inactive := range inactiveLVs {
+		owned := FilterOwnedVGs(log, "activate", managedVGSet[name], o, nil)
+		if len(owned) == 0 {
+			continue
+		}
+		for _, lv := range inactive {
+			log.Warn(fmt.Sprintf("detected inactive LV %s/%s (attr=%s)", lv.VGName, lv.LVName, lv.LVAttr))
+		}
+		vgsToActivate[name] = owned[0]
 	}
 
 	if len(vgsToActivate) == 0 {
@@ -378,4 +400,11 @@ func EnsureVGActivation(
 	}
 
 	return activated
+}
+
+func ownership(ctx context.Context, owners VGOwnershipSource) VGOwnership {
+	if owners == nil {
+		return NewVGOwnershipFromClusterTag("")
+	}
+	return owners(ctx)
 }

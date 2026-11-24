@@ -306,6 +306,7 @@ const (
 
 	DeletionProtectionAnnotation = "storage.deckhouse.io/deletion-protection"
 	LVMVolumeGroupTag            = "storage.deckhouse.io/lvmVolumeGroupName"
+	ClusterTagKey                = "storage.deckhouse.io/cluster"
 	LVGMetadataNameLabelKey      = "kubernetes.io/metadata.name"
 
 	// FileDeviceImageSuffix is the trailing component the agent appends

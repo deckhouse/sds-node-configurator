@@ -67,7 +67,7 @@ func TestActivateAllManagedVGs_SkipsAForeignLoopBackedVG(t *testing.T) {
 	// Only ours. gomock fails the test if VGActivate is called for the image.
 	mc.EXPECT().VGActivate(gomock.Any(), "ours", false).Return("vgchange -ay ours", nil)
 
-	err := utils.ActivateAllManagedVGs(context.Background(), testLogger(t), mc, monitoring.GetMetrics("test_node"), 30*time.Second)
+	err := utils.ActivateAllManagedVGs(context.Background(), testLogger(t), mc, monitoring.GetMetrics("test_node"), ownerOf(restoredImageVG, "ours"), 30*time.Second)
 	assert.NoError(t, err)
 }
 
@@ -88,7 +88,7 @@ func TestActivateAllManagedVGs_RefusesWhenPVsCannotBeListed(t *testing.T) {
 		Return(nil, "lvm pvs", bytes.Buffer{}, errors.New("lvm unavailable"))
 	// No VGActivate at all.
 
-	err := utils.ActivateAllManagedVGs(context.Background(), testLogger(t), mc, monitoring.GetMetrics("test_node"), 30*time.Second)
+	err := utils.ActivateAllManagedVGs(context.Background(), testLogger(t), mc, monitoring.GetMetrics("test_node"), ownerOf(restoredImageVG, "ours"), 30*time.Second)
 	assert.Error(t, err)
 }
 
@@ -117,7 +117,7 @@ func TestEnsureVGActivation_SkipsAForeignLoopBackedVG(t *testing.T) {
 	mc.EXPECT().VGActivate(gomock.Any(), "ours", false).Return("vgchange -ay ours", nil)
 
 	activated := utils.EnsureVGActivation(context.Background(), testLogger(t), mc,
-		monitoring.GetMetrics("test_node"), vgs, lvs, verdicts, 30*time.Second)
+		monitoring.GetMetrics("test_node"), vgs, lvs, verdicts, ownerOf(restoredImageVG, "ours"), 30*time.Second)
 	assert.True(t, activated)
 }
 
@@ -158,7 +158,7 @@ func TestReTag_LeavesAForeignLoopBackedVGAlone(t *testing.T) {
 	mc.EXPECT().VGChangeAddTag(gomock.Any(), "ours", managedTag).
 		Return("vgchange --addtag", nil).Times(2) // once from the LV pass, once from the VG pass
 
-	err := utils.ReTagForTest(context.Background(), mc, testLogger(t), monitoring.GetMetrics("test_node"), "test", 30*time.Second)
+	err := utils.ReTagForTest(context.Background(), mc, testLogger(t), monitoring.GetMetrics("test_node"), "test", ownerOf("guest-vg", "ours"), 30*time.Second)
 	assert.NoError(t, err)
 }
 
@@ -178,6 +178,6 @@ func TestReTag_RefusesWhenPVsCannotBeListed(t *testing.T) {
 		Return(nil, "lvm pvs", bytes.Buffer{}, errors.New("lvm unavailable"))
 	// No GetAllLVs, no vgchange, no lvchange.
 
-	err := utils.ReTagForTest(context.Background(), mc, testLogger(t), monitoring.GetMetrics("test_node"), "test", 30*time.Second)
+	err := utils.ReTagForTest(context.Background(), mc, testLogger(t), monitoring.GetMetrics("test_node"), "test", ownerOf("guest-vg", "ours"), 30*time.Second)
 	assert.Error(t, err)
 }

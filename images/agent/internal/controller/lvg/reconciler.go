@@ -189,6 +189,7 @@ type ReconcilerConfig struct {
 	// for a filesystem nothing else on the node depends on.
 	FileDevicesMinFreeSpacePercent int
 	ThinPools                      *thinpoolalloc.Locks
+	ClusterTag                     string
 }
 
 func NewReconciler(
@@ -809,6 +810,10 @@ func (r *Reconciler) reconcileLVGUpdateFunc(
 		log.Debug(fmt.Sprintf("successfully updated VG %s tag of the LVMVolumeGroup %s", vg.VGName, lvg.Name))
 	} else {
 		log.Debug(fmt.Sprintf("no need to update VG %s tag of the LVMVolumeGroup %s", vg.VGName, lvg.Name))
+	}
+
+	if err := r.ensureClusterTag(ctx, vg); err != nil {
+		log.Error(fmt.Sprintf("unable to tag VG %s of the LVMVolumeGroup %s with %s", vg.VGName, lvg.Name, r.cfg.ClusterTag), logger.Err(err))
 	}
 
 	log.Debug(fmt.Sprintf("starts to resize PV of the LVMVolumeGroup %s", lvg.Name))
@@ -2487,6 +2492,10 @@ func (r *Reconciler) createVGComplex(ctx context.Context, lvg *v1alpha1.LVMVolum
 
 	log.Debug(fmt.Sprintf("successfully create VG %s of the LVMVolumeGroup %s", lvg.Spec.ActualVGNameOnTheNode, lvg.Name))
 
+	if err := r.ensureClusterTag(ctx, internal.VGData{VGName: lvg.Spec.ActualVGNameOnTheNode}); err != nil {
+		log.Error(fmt.Sprintf("unable to tag VG %s of the LVMVolumeGroup %s with %s", lvg.Spec.ActualVGNameOnTheNode, lvg.Name, r.cfg.ClusterTag), logger.Err(err))
+	}
+
 	r.triggerUdevForPaths(ctx, paths)
 
 	return nil
@@ -2549,6 +2558,36 @@ func (r *Reconciler) updateVGTagIfNeeded(
 	}
 
 	return false, nil
+}
+
+func (r *Reconciler) ensureClusterTag(ctx context.Context, vg internal.VGData) error {
+	if r.cfg.ClusterTag == "" {
+		return nil
+	}
+
+	if foreign := utils.ForeignClusterTags(vg.VGTags, r.cfg.ClusterTag); len(foreign) > 0 {
+		return fmt.Errorf("the VG is tagged %s, so it belongs to another cluster; if it is this cluster's, remove the tag with `vgchange --deltag`", strings.Join(foreign, ","))
+	}
+
+	if utils.HasTag(vg.VGTags, r.cfg.ClusterTag) {
+		return nil
+	}
+	return r.addVGTag(ctx, vg.VGName, r.cfg.ClusterTag)
+}
+
+func (r *Reconciler) addVGTag(ctx context.Context, vgName, tag string) error {
+	start := time.Now()
+	cmd, err := utils.RunWithTimeout(ctx, r.cfg.CmdDeadlineDuration, func(ctx context.Context) (string, error) {
+		return r.commands.VGChangeAddTag(ctx, vgName, tag)
+	})
+	r.metrics.UtilsCommandsDuration(ReconcilerName, "vgchange").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
+	r.metrics.UtilsCommandsExecutionCount(ReconcilerName, "vgchange").Inc()
+	r.log.Debug(fmt.Sprintf("exec cmd: %s", cmd))
+	if err != nil {
+		r.metrics.UtilsCommandsErrorsCount(ReconcilerName, "vgchange").Inc()
+		return err
+	}
+	return nil
 }
 
 func (r *Reconciler) extendThinPool(lvg *v1alpha1.LVMVolumeGroup, specThinPool v1alpha1.LVMVolumeGroupThinPoolSpec) error {

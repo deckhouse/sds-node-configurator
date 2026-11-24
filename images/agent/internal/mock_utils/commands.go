@@ -33,6 +33,7 @@ import (
 	logger "github.com/deckhouse/sds-common-lib/logger"
 	internal "github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	monitoring "github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
+	utils "github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -562,17 +563,17 @@ func (mr *MockCommandsMockRecorder) PVScan(ctx any) *gomock.Call {
 }
 
 // ReTag mocks base method.
-func (m *MockCommands) ReTag(ctx context.Context, log logger.Logger, metrics *monitoring.Metrics, ctrlName string, cmdTimeout time.Duration) error {
+func (m *MockCommands) ReTag(ctx context.Context, log logger.Logger, metrics *monitoring.Metrics, ctrlName string, owners utils.VGOwnershipSource, cmdTimeout time.Duration) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ReTag", ctx, log, metrics, ctrlName, cmdTimeout)
+	ret := m.ctrl.Call(m, "ReTag", ctx, log, metrics, ctrlName, owners, cmdTimeout)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // ReTag indicates an expected call of ReTag.
-func (mr *MockCommandsMockRecorder) ReTag(ctx, log, metrics, ctrlName, cmdTimeout any) *gomock.Call {
+func (mr *MockCommandsMockRecorder) ReTag(ctx, log, metrics, ctrlName, owners, cmdTimeout any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReTag", reflect.TypeOf((*MockCommands)(nil).ReTag), ctx, log, metrics, ctrlName, cmdTimeout)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReTag", reflect.TypeOf((*MockCommands)(nil).ReTag), ctx, log, metrics, ctrlName, owners, cmdTimeout)
 }
 
 // ReduceVG mocks base method.
