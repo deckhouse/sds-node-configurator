@@ -19,3 +19,6 @@ highlights: []
 #     to: "1.1"
 #     changelog_url: "https://..."
 #     notes: "..."
+
+fixes:
+  - "The logs of the `controller` container and of the `sds-node-configurator-agent` container no longer show `[controller-runtime] log.SetLogger(...) was never called; logs will not be displayed` with a stack trace. The messages of the controller-runtime cache and of the Kubernetes client inside the controller and the agent, such as `Failed to watch` when they cannot list a resource, were dropped; they are now written to their logs in the same format as their other messages."

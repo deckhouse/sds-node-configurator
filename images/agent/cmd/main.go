@@ -31,6 +31,7 @@ import (
 	extv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	ctrl "sigs.k8s.io/controller-runtime"
 	crcache "sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -95,6 +96,7 @@ func run() int {
 		fmt.Printf("unable to create NewLogger, err: %v\n", err)
 		return 1
 	}
+	ctrl.SetLogger(baseLog.GetLogger())
 	log := baseLog.Named("main")
 
 	log.Info(fmt.Sprintf("go Version:%s ", goruntime.Version()))

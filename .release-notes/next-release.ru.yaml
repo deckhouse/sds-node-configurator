@@ -19,3 +19,6 @@ highlights: []
 #     to: "1.1"
 #     changelog_url: "https://..."
 #     notes: "..."
+
+fixes:
+  - "В логах контейнеров `controller` и `sds-node-configurator-agent` больше не появляется сообщение `[controller-runtime] log.SetLogger(...) was never called; logs will not be displayed` со стеком вызовов. Сообщения кеша controller-runtime и клиента Kubernetes внутри контроллера и агента, например `Failed to watch`, когда они не могут получить список ресурсов, раньше отбрасывались; теперь они пишутся в их логи в том же формате, что и остальные их сообщения."
