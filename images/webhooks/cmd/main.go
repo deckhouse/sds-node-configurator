@@ -65,6 +65,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "unable to create the logger: %s\n", err)
 		os.Exit(1)
 	}
+	ctrl.SetLogger(log.GetLogger())
 	cfg := initFlags()
 
 	scheme := runtime.NewScheme()
